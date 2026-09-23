@@ -252,3 +252,34 @@ def test_llm_explain_is_off_by_default_and_only_sees_model_output(authed, fast_c
     assert [c["type"] for c in seen["content"]] == ["text"]  # no images, just the model's JSON
     assert '"points"' not in seen["content"][0]["text"]
     assert authed.get("/api/outcomes/nope").status_code == 404
+
+
+@pytest.mark.parametrize("target_dir", [1, -1])
+@pytest.mark.parametrize("roll_top", [-60.0, 60.0])
+def test_wrist_bow_and_forearm_roll(target_dir, roll_top):
+    def metrics(**kw):
+        pose = make_swing(target_dir=target_dir, hand_roll_top_deg=roll_top, **kw)
+        ev = {k: v.frame for k, v in detect_events(pose, "right").events.items()}
+        return {(m.metric_name, m.event_ref): m for m in compute_metrics(pose, ev)}, pose, ev
+
+    # Rolled back past address (face closing) by 25 deg at impact, wrist bowed 20 deg; the
+    # shoulders opening doesn't leak into the forearm roll (it's measured relative to the torso).
+    m, _, _ = metrics(wrist_bow_deg=20, hand_roll_impact_deg=-25 * np.sign(roll_top), shoulders_open_deg=20)
+    assert m[("lead_wrist_bow", EventType.top)].value == pytest.approx(20, abs=1)
+    assert m[("lead_wrist_bow", EventType.impact)].is_estimate
+    assert m[("lead_forearm_roll", EventType.impact)].value == pytest.approx(25, abs=4)
+    assert m[("lead_forearm_roll", EventType.mid_downswing)].value < 0  # still open mid-downswing
+    assert m[("forearm_roll_speed", EventType.impact)].value > 0
+
+    cupped, _, _ = metrics(wrist_bow_deg=-15, hand_roll_impact_deg=0)
+    assert cupped[("lead_wrist_bow", EventType.top)].value == pytest.approx(-15, abs=1)
+    assert abs(cupped[("lead_forearm_roll", EventType.impact)].value) < 4
+
+    # Hand points not visible: no wrist metrics rather than made-up ones.
+    from app.pipeline import landmarks as L
+
+    _, pose, ev = metrics()
+    pose.visibility[:, [L.L_INDEX, L.L_PINKY]] = 0.1
+    names = {m.metric_name for m in compute_metrics(pose, ev)}
+    assert not names & {"lead_wrist_bow", "lead_wrist_hinge", "lead_forearm_roll", "forearm_roll_speed"}
+    assert "shoulders_open" in names

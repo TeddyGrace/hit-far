@@ -15,6 +15,16 @@ Conventions (face-on camera):
 0.2.0 adds the slice/contact-relevant set: shoulders/hips open at mid-downswing and impact,
 sequencing (hip vs shoulder peak rotation speed), pelvis position in the stance, hands ahead at
 impact and transition time.
+
+0.3.0 adds lead-wrist metrics from MediaPipe's coarse hand points (wrist, index and pinky
+knuckles), all 3D estimates and the least reliable landmarks in the model (hands overlap on the
+grip and blur near impact), so each is emitted only where those points are visible:
+  * lead_wrist_bow: flexion (+, bowed) / extension (-, cupped) of the hand vs the forearm.
+  * lead_wrist_hinge: radial deviation (+, cocked toward the thumb) vs the forearm.
+  * lead_forearm_roll: rotation of the back of the lead hand about the forearm, relative to the
+    torso and to address, oriented by the golfer's own backswing: negative = rotated the way the
+    backswing rotates it (face opening), positive = rotated back past address (face closing).
+  * forearm_roll_speed: how fast that rotation is closing at impact.
 """
 
 from dataclasses import dataclass
@@ -37,7 +47,7 @@ from app.pipeline.landmarks import (
 )
 from app.pipeline.posedata import PoseData
 
-PIPELINE_VERSION = "0.2.0"
+PIPELINE_VERSION = "0.3.0"
 
 E = EventType
 
@@ -84,6 +94,84 @@ def _open_series(world: np.ndarray, lead_i: int, trail_i: int, a: int, t: int, m
     full = np.full(len(world), np.nan)
     full[a:] = -turn * np.sign(at_top)
     return full
+
+
+def _unit(v: np.ndarray) -> np.ndarray:
+    n = np.linalg.norm(v, axis=-1, keepdims=True)
+    return v / np.where(n == 0, np.nan, n)
+
+
+def _perp(v: np.ndarray, axis_hat: np.ndarray) -> np.ndarray:
+    """Component of v perpendicular to the (unit) axis."""
+    return v - np.sum(v * axis_hat, axis=-1, keepdims=True) * axis_hat
+
+
+def _hand_frame(world: np.ndarray, side, handedness_side: str):
+    """Per-frame forearm direction, hand direction, dorsal normal and radial (thumb-side) axis.
+
+    MediaPipe world axes follow the image (x right, y down, z away from the camera), so the
+    index-pinky-wrist triangle's winding gives the back-of-hand direction; it's mirrored between
+    the left and right hand."""
+    w, e = world[:, side.wrist], world[:, side.elbow]
+    idx, pky = world[:, side.index], world[:, side.pinky]
+    f = _unit(w - e)
+    h = _unit((idx + pky) / 2 - w)
+    n = np.cross(idx - w, pky - w)
+    n = _unit(n if handedness_side == "left" else -n)
+    r = _unit(_perp(idx - pky, h))
+    return f, h, n, r
+
+
+def _signed_angle(a: np.ndarray, b: np.ndarray, axis_hat: np.ndarray) -> np.ndarray:
+    """Signed angle (deg) from a to b about axis (vectors already perpendicular to it)."""
+    return np.degrees(np.arctan2(np.sum(np.cross(a, b) * axis_hat, axis=-1), np.sum(a * b, axis=-1)))
+
+
+def _wrist_metrics(world: np.ndarray, vis: np.ndarray, events: dict, lead, trail, handedness: str,
+                   fps: float, add) -> None:
+    a, t, i = events.get(E.address), events.get(E.top), events.get(E.impact)
+    if a is None:
+        return
+    lead_name = "left" if handedness == "right" else "right"
+    f, h, n, r = _hand_frame(world, lead, lead_name)
+    hand_vis = np.minimum.reduce([vis[:, lead.wrist], vis[:, lead.index], vis[:, lead.pinky]])
+
+    def seen(fr: int) -> bool:
+        return 0 <= fr < len(vis) and hand_vis[fr] >= 0.5
+
+    for ev in (E.top, E.impact):
+        fr = events.get(ev)
+        if fr is None or not seen(fr):
+            continue
+        # The forearm leans toward the back of the hand when the wrist is flexed (bowed).
+        bow = np.degrees(np.arctan2(f[fr] @ n[fr], f[fr] @ h[fr]))
+        add("lead_wrist_bow", ev, bow, "deg", True)
+        if ev == E.top:
+            # ...and toward the pinky side when it's cocked toward the thumb.
+            add("lead_wrist_hinge", ev, np.degrees(np.arctan2(-(f[fr] @ r[fr]), f[fr] @ h[fr])), "deg", True)
+
+    if t is None or i is None or not (a < t < i):
+        return
+    # Forearm roll: back-of-hand direction about the forearm, measured from the shoulder line
+    # (so it's relative to the torso, not the camera).
+    sh = world[:, lead.shoulder] - world[:, trail.shoulder]
+    ref = _unit(_perp(sh, f))
+    nd = _unit(_perp(n, f))
+    roll = np.degrees(np.unwrap(np.radians(_signed_angle(ref, nd, f))))
+    if np.isnan(roll[a]) or np.isnan(roll[t]):
+        return
+    back = roll[t] - roll[a]
+    if abs(back) < 15:
+        return  # no measurable backswing rotation: the closing direction is unknowable
+    closing = -(roll - roll[a]) * np.sign(back)
+    for ev in (E.mid_downswing, E.impact, E.mid_follow_through):
+        fr = events.get(ev)
+        if fr is not None and fr > t and seen(fr):
+            add("lead_forearm_roll", ev, closing[fr], "deg", True)
+    k = max(1, int(round(0.02 * fps)))
+    lo, hi = max(t, i - k), min(len(closing) - 1, i + k)
+    if hi > lo and all(seen(k) for k in range(lo, hi + 1)):
+        add("forearm_roll_speed", E.impact, (closing[hi] - closing[lo]) / ((hi - lo) / fps), "deg/s", True)
 
 
 def compute_metrics(pose: PoseData, events: dict[EventType, int], handedness: str = "right") -> list[MetricValue]:
@@ -187,6 +275,8 @@ def compute_metrics(pose: PoseData, events: dict[EventType, int], handedness: st
                     peak_h = t + int(np.nanargmax(np.gradient(hp_open[win])))
                     peak_s = t + int(np.nanargmax(np.gradient(sh_open[win])))
                     add("sequencing_hip_lead", None, (peak_s - peak_h) / fps * 1000, "ms", True)
+        _wrist_metrics(smooth(interpolate_nans(pose.world), max(1.0, fps * 0.01)), pose.visibility, events,
+                       lead, trail, handedness, fps, add)
         add("lead_knee_flex", E.address,
             180 - joint_angle(world[a, lead.hip], world[a, lead.knee], world[a, lead.ankle]), "deg", True)
         add("trail_knee_flex", E.address,

@@ -10,6 +10,9 @@ NOSE = 0
 L_SHOULDER, R_SHOULDER = 11, 12
 L_ELBOW, R_ELBOW = 13, 14
 L_WRIST, R_WRIST = 15, 16
+L_PINKY, R_PINKY = 17, 18
+L_INDEX, R_INDEX = 19, 20
+L_THUMB, R_THUMB = 21, 22
 L_HIP, R_HIP = 23, 24
 L_KNEE, R_KNEE = 25, 26
 L_ANKLE, R_ANKLE = 27, 28
@@ -34,10 +37,12 @@ class Side:
     hip: int
     knee: int
     ankle: int
+    index: int  # index-finger knuckle (MediaPipe's coarse hand points)
+    pinky: int
 
 
-LEFT = Side(L_SHOULDER, L_ELBOW, L_WRIST, L_HIP, L_KNEE, L_ANKLE)
-RIGHT = Side(R_SHOULDER, R_ELBOW, R_WRIST, R_HIP, R_KNEE, R_ANKLE)
+LEFT = Side(L_SHOULDER, L_ELBOW, L_WRIST, L_HIP, L_KNEE, L_ANKLE, L_INDEX, L_PINKY)
+RIGHT = Side(R_SHOULDER, R_ELBOW, R_WRIST, R_HIP, R_KNEE, R_ANKLE, R_INDEX, R_PINKY)
 
 
 def sides(handedness: str) -> tuple[Side, Side]:

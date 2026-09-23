@@ -22,6 +22,10 @@ export const NAMES: Record<string, string> = {
   sequencing_hip_lead: "Hips lead shoulders (peak rotation speed)",
   pelvis_toward_lead_foot: "Pelvis over stance (0 trail – 100 lead ankle)",
   hands_ahead: "Hands ahead of address position",
+  lead_wrist_bow: "Lead wrist bow (+ bowed, − cupped)",
+  lead_wrist_hinge: "Lead wrist hinge (+ cocked)",
+  lead_forearm_roll: "Forearm roll (+ = rotated closed vs address)",
+  forearm_roll_speed: "Forearm roll speed (+ = closing)",
 };
 
 /** "shoulders_open@impact" -> "Shoulders open (…) at Impact". */
@@ -36,6 +40,7 @@ export function fmtValue(value: number, unit: string): string {
   if (unit === "ratio") return `${value.toFixed(2)} : 1`;
   if (unit === "s") return `${value.toFixed(2)} s`;
   if (unit === "ms") return `${value.toFixed(0)} ms`;
+  if (unit === "deg/s") return `${value.toFixed(0)}°/s`;
   if (unit === "deg") return `${value.toFixed(1)}°`;
   if (unit.startsWith("%")) return `${value.toFixed(0)} ${unit}`;
   return `${value.toFixed(2)} ${unit}`;

@@ -27,10 +27,14 @@ def _phi(t: float, a=ADDRESS_S, top=TOP_S, imp=IMPACT_S, fin=FINISH_S) -> float:
 
 def make_swing(target_dir: int = 1, turn_at_top_deg: float = 90.0, hip_turn_at_top_deg: float = 45.0,
                times: tuple[float, float, float, float, float] | None = None, fps: float = FPS,
-               shoulders_open_deg: float = 0.0, hips_open_deg: float = 0.0) -> PoseData:
+               shoulders_open_deg: float = 0.0, hips_open_deg: float = 0.0,
+               wrist_bow_deg: float = 0.0, hand_roll_top_deg: float = -60.0,
+               hand_roll_impact_deg: float = 0.0) -> PoseData:
     """target_dir=+1 means the target is toward +x in the image (lead side on the right of the image).
     times = (address, top, impact, finish, end) in seconds. *_open_deg = rotation past address
-    toward the target reached at impact (ramped in over the downswing)."""
+    toward the target reached at impact (ramped in over the downswing). The lead hand rolls about
+    the forearm (relative to the shoulder line) to hand_roll_top_deg at the top and to
+    hand_roll_impact_deg at impact; wrist_bow_deg flexes it toward the palm throughout."""
     a_s, top_s, imp_s, fin_s, end_s = times or (ADDRESS_S, TOP_S, IMPACT_S, FINISH_S, END_S)
     phi_at = lambda t: _phi(t, a_s, top_s, imp_s, fin_s)  # noqa: E731
     T = int(end_s * fps)
@@ -69,6 +73,26 @@ def make_swing(target_dir: int = 1, turn_at_top_deg: float = 90.0, hip_turn_at_t
             world[f, ri] = [-v[0], y, -v[2]]
         world[f, L.L_ELBOW] = world[f, lead_sh] + [0, 0.3, 0]
         world[f, L.L_WRIST] = world[f, lead_sh] + [0, 0.6, 0]
+        # Lead (left) hand: fingers continue down the forearm, back of the hand toward the camera
+        # at address; index/pinky knuckles either side. Rotated about the forearm (vertical) with
+        # the torso plus the hand's own roll.
+        torso = np.radians(turn_at_top_deg * prog - shoulders_open_deg * down)
+        if t <= top_s:
+            roll = hand_roll_top_deg * prog
+        elif t <= imp_s:
+            roll = hand_roll_top_deg + (hand_roll_impact_deg - hand_roll_top_deg) * down
+        else:
+            roll = hand_roll_impact_deg
+        th = torso + np.radians(roll)
+        b = np.radians(wrist_bow_deg)
+
+        def rot(v, th=th):
+            return np.array([v[0] * np.cos(th) - v[2] * np.sin(th), v[1], v[0] * np.sin(th) + v[2] * np.cos(th)])
+
+        hand_dir = rot(np.array([0.0, np.cos(b), np.sin(b)]))
+        lateral = rot(np.array([-1.0, 0.0, 0.0]))
+        world[f, L.L_INDEX] = world[f, L.L_WRIST] + 0.08 * hand_dir + 0.04 * lateral
+        world[f, L.L_PINKY] = world[f, L.L_WRIST] + 0.08 * hand_dir - 0.04 * lateral
         for knee, hip, ankle in ((L.L_KNEE, L.L_HIP, L.L_ANKLE), (L.R_KNEE, L.R_HIP, L.R_ANKLE)):
             world[f, knee] = world[f, hip] + [0, 0.45, 0.1]
             world[f, ankle] = world[f, knee] + [0, 0.45, -0.1]
