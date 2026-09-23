@@ -116,7 +116,7 @@ def _extract_one(args: tuple[int, str]) -> tuple[int, bytes | None, str | None]:
     """Worker-process entry: run pose on one clip. Returns npz bytes (or an error)."""
     clip_id, path = args
     try:
-        os.environ.setdefault("OMP_NUM_THREADS", "1")
+        os.environ["OMP_NUM_THREADS"] = "1"  # one pose process per core; no nested thread pools
         from app.pipeline.pose import run_pose
 
         pose = run_pose(Path(path))

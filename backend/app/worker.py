@@ -5,6 +5,7 @@ training jobs, so long training runs never block swing processing.
 """
 
 import logging
+import os
 import signal
 import sys
 import time
@@ -103,7 +104,10 @@ def main() -> None:
     from app.pipeline.pose import ensure_pose_model
 
     ensure_pose_model()
-    log.info("%s started", role)
+    from app.resources import THREAD_ENV, available_cpus, memory_limit_mb
+
+    log.info("%s started (cpus=%d, memory_mb=%s, threads=%s)", role, available_cpus(), memory_limit_mb(),
+             os.environ.get(THREAD_ENV[0]))
     interval = get_settings().worker_poll_interval_s
     while not _stop:
         try:

@@ -17,6 +17,10 @@ from app.training.model import N_EVENTS, build_model, predict
 def load_checkpoint(checkpoint_uri: str):
     import torch
 
+    from app.resources import available_cpus
+
+    # A small recurrent model over a few hundred frames: more threads only add sync overhead.
+    torch.set_num_threads(min(4, available_cpus()))
     ckpt = torch.load(io.BytesIO(get_storage().get_bytes(checkpoint_uri)), map_location="cpu", weights_only=True)
     if ckpt.get("feature_version") != FEATURE_VERSION:
         raise RuntimeError(f"checkpoint features v{ckpt.get('feature_version')} != code v{FEATURE_VERSION}")

@@ -283,3 +283,32 @@ def test_wrist_bow_and_forearm_roll(target_dir, roll_top):
     names = {m.metric_name for m in compute_metrics(pose, ev)}
     assert not names & {"lead_wrist_bow", "lead_wrist_hinge", "lead_forearm_roll", "forearm_roll_speed"}
     assert "shoulders_open" in names
+
+
+def test_only_face_on_swings_feed_the_outcome_models(engine):
+    from app.db import get_sessionmaker
+    from app.models import CameraRole, Swing, Video
+    from app.outcomes.features import load_table
+
+    ids = [sid for sid, _ in _make_swings(4, seed=5)]
+    with get_sessionmaker()() as db:
+        dtl = db.get(Video, db.get(Swing, ids[0]).video_ids[0])
+        dtl.camera_role = CameraRole.down_the_line
+        db.commit()
+        table = load_table(db)
+    assert ids[0] not in table.swing_ids and set(ids[1:]) <= set(table.swing_ids)
+
+
+def test_thread_pools_follow_the_container_quota(monkeypatch):
+    from app import resources
+
+    monkeypatch.setenv("MAX_THREADS", "3")
+    for var in resources.THREAD_ENV:
+        monkeypatch.delenv(var, raising=False)
+    assert resources.limit_threads() == 3
+    import os
+
+    assert all(os.environ[v] == "3" for v in resources.THREAD_ENV)
+    monkeypatch.setenv("OMP_NUM_THREADS", "1")  # an explicit setting wins
+    resources.limit_threads()
+    assert os.environ["OMP_NUM_THREADS"] == "1"

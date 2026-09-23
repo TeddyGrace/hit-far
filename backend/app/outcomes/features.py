@@ -8,7 +8,7 @@ import numpy as np
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Metric, ShotOutcome, Swing
+from app.models import CameraRole, Metric, ShotOutcome, Swing, Video
 from app.pipeline.metrics import PIPELINE_VERSION
 
 # A feature must be measured on at least this share of the swings to be used; the models handle
@@ -28,7 +28,7 @@ class FeatureInfo:
 
 @dataclass
 class Table:
-    """Metrics (current pipeline version) and outcomes for every swing that has metrics."""
+    """Metrics (current pipeline version) and outcomes for every face-on swing that has metrics."""
 
     swing_ids: list[uuid.UUID]
     created_at: dict[uuid.UUID, datetime]
@@ -59,8 +59,14 @@ def load_table(db: Session) -> Table:
         fname = feature_name(name, ev.value if ev is not None else None)
         values.setdefault(sid, {})[fname] = value
         info.setdefault(fname, FeatureInfo(unit, est))
-    swings = db.execute(select(Swing.id, Swing.created_at, Swing.session_id).where(Swing.id.in_(list(values)))).all()
-    swings = sorted(swings, key=lambda r: r.created_at)
+    swings = db.execute(select(Swing.id, Swing.created_at, Swing.session_id, Swing.video_ids)
+                        .where(Swing.id.in_(list(values)))).all()
+    # Metrics are defined for a face-on camera (lateral sway, lean, tilts); a down-the-line swing's
+    # numbers mean something else, so mixing them in would corrupt what the models learn.
+    roles = dict(db.execute(select(Video.id, Video.camera_role)).all())
+    swings = sorted((r for r in swings if roles.get(r.video_ids[0]) == CameraRole.face_on),
+                    key=lambda r: r.created_at)
+    values = {r.id: values[r.id] for r in swings}
     outcomes = {o.swing_id: outcome_dict(o) for o in db.scalars(select(ShotOutcome)).all()}
     return Table(
         swing_ids=[r.id for r in swings],
