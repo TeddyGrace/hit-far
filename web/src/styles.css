@@ -1,0 +1,125 @@
+:root {
+  --bg: #f6f7f5;
+  --panel: #ffffff;
+  --text: #1c211e;
+  --muted: #6b736e;
+  --border: #dfe3df;
+  --accent: #1f7a4d;
+  --accent-soft: #e3f2ea;
+  --warn: #b7791f;
+  --warn-soft: #fdf3e1;
+  --bad: #c0392b;
+  --bad-soft: #fbe9e7;
+  --blue: #2b6cb0;
+  --blue-soft: #e6effa;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121513;
+    --panel: #1a1e1b;
+    --text: #e6ebe7;
+    --muted: #8e978f;
+    --border: #2d332f;
+    --accent: #4cc38a;
+    --accent-soft: #1d3328;
+    --warn: #e0a84a;
+    --warn-soft: #3a2f1a;
+    --bad: #ef7c6e;
+    --bad-soft: #3b201c;
+    --blue: #7fb0ea;
+    --blue-soft: #1c2a3b;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); }
+a { color: var(--accent); }
+h1 { font-size: 1.4rem; margin: 0.4rem 0 1rem; }
+h2 { font-size: 1rem; margin: 0 0 0.5rem; display: flex; gap: 0.5rem; align-items: center; }
+.muted { color: var(--muted); }
+.small { font-size: 0.8rem; }
+.error { color: var(--bad); }
+
+.topbar {
+  display: flex; align-items: center; gap: 1.5rem; padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--border); background: var(--panel);
+}
+.topbar .brand { font-weight: 700; text-decoration: none; color: var(--text); }
+.topbar nav { display: flex; gap: 1rem; flex: 1; }
+.topbar nav a { text-decoration: none; color: var(--muted); }
+.topbar nav a.active { color: var(--text); font-weight: 600; }
+.page { padding: 1rem; max-width: 1400px; margin: 0 auto; }
+
+button {
+  font: inherit; padding: 0.4rem 0.8rem; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--panel); color: var(--text); cursor: pointer;
+}
+button[type="submit"] { background: var(--accent); color: white; border-color: var(--accent); }
+button:disabled { opacity: 0.5; cursor: default; }
+button.link { border: none; background: none; padding: 0 0.3rem; color: var(--accent); }
+button.link.danger { color: var(--bad); }
+input, select {
+  font: inherit; padding: 0.35rem 0.5rem; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--panel); color: var(--text);
+}
+label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.85rem; color: var(--muted); }
+label.inline { flex-direction: row; align-items: center; gap: 0.35rem; color: var(--text); }
+
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 1rem; }
+.row-form { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: flex-end; margin-bottom: 1rem; }
+.row-form .grow { flex: 1; min-width: 200px; }
+
+.login { display: grid; place-items: center; min-height: 100vh; }
+.login form { display: flex; flex-direction: column; gap: 0.75rem; width: 300px; }
+
+.table { width: 100%; border-collapse: collapse; background: var(--panel); border-radius: 8px; overflow: hidden; }
+.table th, .table td { text-align: left; padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--border); font-size: 0.9rem; vertical-align: top; }
+.table th { font-weight: 600; color: var(--muted); font-size: 0.8rem; }
+.table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.table td.actions { white-space: nowrap; text-align: right; }
+.table tr.group th { background: var(--bg); color: var(--text); padding-top: 0.6rem; }
+.table tr.current td { background: var(--accent-soft); }
+
+.chip {
+  display: inline-block; padding: 0.05rem 0.5rem; border-radius: 999px; font-size: 0.75rem;
+  background: var(--bg); border: 1px solid var(--border); color: var(--muted); white-space: nowrap;
+}
+.chip.ok { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.chip.busy { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.chip.bad { background: var(--bad-soft); color: var(--bad); border-color: transparent; }
+.chip.corrected { background: var(--blue-soft); color: var(--blue); border-color: transparent; }
+.badge {
+  margin-left: 0.4rem; font-size: 0.65rem; padding: 0 0.35rem; border-radius: 4px;
+  background: var(--warn-soft); color: var(--warn); cursor: help; text-transform: uppercase; letter-spacing: 0.03em;
+}
+.upload { display: flex; gap: 1rem; align-items: center; margin: 0.25rem 0; font-size: 0.9rem; }
+.error-details pre { white-space: pre-wrap; font-size: 0.75rem; max-height: 200px; overflow: auto; }
+
+.swing-header { display: flex; align-items: center; gap: 1.5rem; }
+.swing-layout { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 1rem; align-items: start; }
+@media (max-width: 1000px) { .swing-layout { grid-template-columns: 1fr; } }
+.side { display: flex; flex-direction: column; gap: 1.25rem; }
+
+.video-wrap { position: relative; background: #000; border-radius: 8px; overflow: hidden; }
+.video-wrap video { display: block; width: 100%; max-height: 72vh; object-fit: contain; }
+.video-wrap canvas { position: absolute; left: 0; top: 0; pointer-events: none; }
+.controls { display: flex; gap: 0.5rem; align-items: center; margin: 0.5rem 0; flex-wrap: wrap; }
+.frame-info { margin-left: auto; font-variant-numeric: tabular-nums; font-size: 0.85rem; color: var(--muted); }
+
+.timeline { padding: 0.75rem 0 1.5rem; user-select: none; }
+.track { position: relative; height: 10px; background: var(--border); border-radius: 5px; cursor: pointer; margin: 0 14px; }
+.playhead { position: absolute; top: -6px; width: 2px; height: 22px; background: var(--text); transform: translateX(-1px); pointer-events: none; }
+.marker {
+  position: absolute; top: 12px; transform: translateX(-50%); font-size: 0.65rem; font-weight: 700;
+  padding: 1px 4px; border-radius: 4px; background: var(--accent); color: white; cursor: grab; touch-action: none;
+}
+.marker::before {
+  content: ""; position: absolute; left: 50%; top: -10px; width: 2px; height: 10px; background: inherit; transform: translateX(-1px);
+}
+.marker.low { background: var(--warn); }
+.marker.corrected { background: var(--blue); }
+.marker:active { cursor: grabbing; }
+.table.events button.link { text-align: left; }
+.table td.num { white-space: nowrap; }
