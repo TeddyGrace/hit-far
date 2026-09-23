@@ -28,7 +28,7 @@ def fake_pose(monkeypatch):
 
 def test_requires_auth(client):
     assert client.get("/api/sessions").status_code == 401
-    assert client.post("/api/auth/login", json={"password": "nope"}).status_code == 401
+    assert client.post("/api/auth/login", json={"username": "owner", "password": "nope"}).status_code == 401
     assert client.get("/api/health").status_code == 200
 
 

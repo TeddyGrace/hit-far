@@ -7,9 +7,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import jobs
-from app.auth import require_auth
+from app.auth import current_user, require_auth
 from app.db import get_db
-from app.models import JobStatus, PoseSequence, Swing, Video, VideoStatus
+from app.models import JobStatus, PoseSequence, RecordingSession, Swing, User, Video, VideoStatus
 from app.routers.sessions import get_session_or_404
 from app.schemas import JobOut, ReprocessIn, UploadIn, UploadOut, VideoOut
 from app.storage import get_storage
@@ -20,16 +20,17 @@ router = APIRouter(prefix="/api", tags=["videos"], dependencies=[Depends(require
 ALLOWED_EXT = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm"}
 
 
-def get_video_or_404(db: Session, video_id: uuid.UUID) -> Video:
+def get_video_or_404(db: Session, video_id: uuid.UUID, user: User) -> Video:
     v = db.get(Video, video_id)
-    if v is None:
+    if v is None or db.get(RecordingSession, v.session_id).user_id != user.id:
         raise HTTPException(404, "video not found")
     return v
 
 
 @router.post("/sessions/{session_id}/videos", response_model=UploadOut, status_code=201)
-def create_upload(session_id: uuid.UUID, body: UploadIn, db: Session = Depends(get_db)):
-    get_session_or_404(db, session_id)
+def create_upload(session_id: uuid.UUID, body: UploadIn, db: Session = Depends(get_db),
+                  user: User = Depends(current_user)):
+    get_session_or_404(db, session_id, user)
     ext = Path(body.filename).suffix.lower()
     if ext not in ALLOWED_EXT:
         raise HTTPException(400, f"unsupported file type {ext or '(none)'}")
@@ -46,8 +47,8 @@ def create_upload(session_id: uuid.UUID, body: UploadIn, db: Session = Depends(g
 
 
 @router.post("/videos/{video_id}/complete", response_model=JobOut)
-def complete_upload(video_id: uuid.UUID, db: Session = Depends(get_db)):
-    v = get_video_or_404(db, video_id)
+def complete_upload(video_id: uuid.UUID, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    v = get_video_or_404(db, video_id, user)
     if v.status != VideoStatus.pending_upload:
         raise HTTPException(409, f"video is already {v.status.value}")
     if not get_storage().exists(v.file_uri):
@@ -59,8 +60,9 @@ def complete_upload(video_id: uuid.UUID, db: Session = Depends(get_db)):
 
 
 @router.post("/videos/{video_id}/reprocess", response_model=JobOut)
-def reprocess(video_id: uuid.UUID, body: ReprocessIn, db: Session = Depends(get_db)):
-    v = get_video_or_404(db, video_id)
+def reprocess(video_id: uuid.UUID, body: ReprocessIn, db: Session = Depends(get_db),
+              user: User = Depends(current_user)):
+    v = get_video_or_404(db, video_id, user)
     if v.status == VideoStatus.pending_upload:
         raise HTTPException(409, "upload not completed")
     latest = jobs.latest_for(db, v.id)
@@ -77,8 +79,8 @@ def reprocess(video_id: uuid.UUID, body: ReprocessIn, db: Session = Depends(get_
 
 
 @router.delete("/videos/{video_id}", status_code=204)
-def delete_video(video_id: uuid.UUID, db: Session = Depends(get_db)):
-    v = get_video_or_404(db, video_id)
+def delete_video(video_id: uuid.UUID, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    v = get_video_or_404(db, video_id, user)
     keys = [k for k in (v.file_uri, v.proxy_uri) if k]
     swings = db.scalars(select(Swing).where(Swing.video_ids.any(v.id))).all()
     for sw in swings:

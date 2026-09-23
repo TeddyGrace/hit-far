@@ -97,7 +97,8 @@ The whole project is **one Docker image, run as two services**: the API, which a
    | Variable | Value |
    |---|---|
    | `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` |
-   | `APP_PASSWORD` | your login password |
+   | `APP_PASSWORD` | the first user's password (see **Users** below) |
+   | `OWNER_USERNAME` | optional; the first user's name (default `owner`) |
    | `SECRET_KEY` | a long random string (e.g. `openssl rand -hex 32`) |
    | `COOKIE_SECURE` | `true` |
    | `STORAGE_BACKEND` | `s3` |
@@ -108,6 +109,22 @@ The whole project is **one Docker image, run as two services**: the API, which a
 
    If you get signature or host errors, set `S3_ADDRESSING_STYLE=path`.
 4. **Browser uploads go straight to the bucket** through presigned URLs, so the bucket needs CORS for your origin. The API sets it at startup whenever `PUBLIC_ORIGIN` is set. Check the API logs for `bucket CORS set for …`.
+
+## Users
+
+A few golfers can share one deployment. Everyone logs in with a username and password. Passwords are stored as salted scrypt hashes. There is no sign-up page: users are managed from the command line on the API service (for example `railway ssh`; the container starts in `/app/backend`):
+
+```sh
+python -m app.users list
+python -m app.users add alice      # prompts for the password (8+ characters)
+python -m app.users passwd alice
+python -m app.users delete alice   # refused while alice still owns sessions
+```
+
+- **First start:** when no users exist yet, the API creates `OWNER_USERNAME` (default `owner`) with `APP_PASSWORD` and gives it every existing session and outcome model. After that, `APP_PASSWORD` is not used; change the password with `passwd`.
+- **What is private:** each user sees only their own sessions, videos, swings, outcome tags, diagnoses and outcome models. Outcome models are trained per golfer, never on pooled swings, because each golfer's faults are their own.
+- **What is shared:** the pose, event and club models learn from everyone's swings, so more golfers means more training data for them. Anyone can see and promote the shared models.
+- **Handedness** is still one setting (`GOLFER_HANDEDNESS`) for the whole deployment.
 
 ## Outcome models: what in your swing predicts your slice?
 

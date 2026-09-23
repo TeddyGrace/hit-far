@@ -5,12 +5,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.auth import require_auth
+from app.auth import current_user, require_auth
 from app.db import get_db
 from app.diagnosis import claude as claude_mod
 from app.diagnosis.catalog import BY_NAME, FAULTS
 from app.diagnosis.service import current_events, current_metrics, inputs_hash, run_diagnosis
-from app.models import Diagnosis, Label, Model
+from app.models import Diagnosis, Label, Model, User
 from app.routers.swings import get_swing_or_404
 from app.schemas import DiagnoseIn, DiagnosisOut, FaultOut, ModelRef, VerdictIn
 
@@ -49,8 +49,8 @@ def list_faults():
 
 
 @router.get("/swings/{swing_id}/diagnoses", response_model=list[DiagnosisOut])
-def list_diagnoses(swing_id: uuid.UUID, db: Session = Depends(get_db)):
-    swing = get_swing_or_404(db, swing_id)
+def list_diagnoses(swing_id: uuid.UUID, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    swing = get_swing_or_404(db, swing_id, user)
     h = _current_hash(db, swing.id)
     rows = db.scalars(
         select(Diagnosis).where(Diagnosis.swing_id == swing.id).order_by(Diagnosis.created_at.desc())
@@ -59,8 +59,9 @@ def list_diagnoses(swing_id: uuid.UUID, db: Session = Depends(get_db)):
 
 
 @router.post("/swings/{swing_id}/diagnoses", response_model=DiagnosisOut, status_code=201)
-def create_diagnosis(swing_id: uuid.UUID, body: DiagnoseIn, db: Session = Depends(get_db)):
-    swing = get_swing_or_404(db, swing_id)
+def create_diagnosis(swing_id: uuid.UUID, body: DiagnoseIn, db: Session = Depends(get_db),
+                     user: User = Depends(current_user)):
+    swing = get_swing_or_404(db, swing_id, user)
     if len(body.symptom_text) > 2000:
         raise HTTPException(400, "symptom text is too long (max 2000 characters)")
     try:
@@ -71,10 +72,12 @@ def create_diagnosis(swing_id: uuid.UUID, body: DiagnoseIn, db: Session = Depend
 
 
 @router.put("/diagnoses/{diagnosis_id}/faults/{fault}", response_model=DiagnosisOut)
-def set_verdict(diagnosis_id: uuid.UUID, fault: str, body: VerdictIn, db: Session = Depends(get_db)):
+def set_verdict(diagnosis_id: uuid.UUID, fault: str, body: VerdictIn, db: Session = Depends(get_db),
+                user: User = Depends(current_user)):
     dx = db.get(Diagnosis, diagnosis_id)
     if dx is None:
         raise HTTPException(404, "diagnosis not found")
+    get_swing_or_404(db, dx.swing_id, user)
     if fault not in BY_NAME:
         raise HTTPException(404, f"unknown fault {fault!r}")
     predicted = (dx.predicted_faults or {}).get(fault)

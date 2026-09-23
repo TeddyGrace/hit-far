@@ -8,7 +8,7 @@ import numpy as np
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import CameraRole, Metric, ShotOutcome, Swing, Video
+from app.models import CameraRole, Metric, RecordingSession, ShotOutcome, Swing, Video
 from app.pipeline.metrics import PIPELINE_VERSION
 
 # A feature must be measured on at least this share of the swings to be used; the models handle
@@ -48,10 +48,12 @@ def outcome_dict(o: ShotOutcome) -> dict:
             "carry": o.carry, "offline": o.offline}
 
 
-def load_table(db: Session) -> Table:
+def load_table(db: Session, user_id: uuid.UUID) -> Table:
+    """One golfer's swings: outcome models are per golfer, never pooled."""
     rows = db.execute(
         select(Metric.swing_id, Metric.metric_name, Metric.event_ref, Metric.value, Metric.unit, Metric.is_estimate)
-        .where(Metric.pipeline_version == PIPELINE_VERSION)
+        .join(Swing, Swing.id == Metric.swing_id).join(RecordingSession, RecordingSession.id == Swing.session_id)
+        .where(Metric.pipeline_version == PIPELINE_VERSION, RecordingSession.user_id == user_id)
     ).all()
     values: dict[uuid.UUID, dict[str, float]] = {}
     info: dict[str, FeatureInfo] = {}

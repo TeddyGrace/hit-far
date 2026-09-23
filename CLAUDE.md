@@ -42,5 +42,9 @@ The golfer's main miss is a **hook / duck-hook**, and they suspect lead-wrist tw
   aren't visible, rather than guessing.
 - Tests: `cd backend && python -m pytest -q`, which needs a Postgres `hitfar_test` database. Web:
   `cd web && npm run typecheck && npm run build`.
+- Users: username + scrypt password,
+  managed with `python -m app.users`. Sessions belong to a user; look rows up through the
+  `get_*_or_404(db, id, user)` helpers so other users get a 404. Outcome models and their datasets
+  carry `user_id` and are per golfer; shared models (pose, events, club) have `user_id` null.
 - Keep secrets (for example `ANTHROPIC_API_KEY`) out of the repo. Don't put model identifiers in
   commits or repo text.

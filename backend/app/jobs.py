@@ -92,9 +92,10 @@ def pending(db: Session, type_: str) -> Job | None:
 
 
 def enqueue_once(db: Session, type_: str, payload: dict) -> Job | None:
-    """Enqueue unless one of this type is already waiting to run (running ones don't count: they
-    may have read the data before the change that triggered this)."""
-    if db.scalar(select(Job).where(Job.type == type_, Job.status == JobStatus.queued).limit(1)):
+    """Enqueue unless the same job (type and payload) is already waiting to run (running ones don't
+    count: they may have read the data before the change that triggered this)."""
+    if db.scalar(select(Job).where(Job.type == type_, Job.payload == payload, Job.status == JobStatus.queued)
+                 .limit(1)):
         return None
     return enqueue(db, type_, payload)
 

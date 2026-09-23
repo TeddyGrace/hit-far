@@ -38,6 +38,7 @@ def client(engine):
 
 @pytest.fixture
 def authed(client):
-    r = client.post("/api/auth/login", json={"password": "test-pw"})
+    # API start-up created the "owner" user from APP_PASSWORD.
+    r = client.post("/api/auth/login", json={"username": "owner", "password": "test-pw"})
     assert r.status_code == 200
     return client

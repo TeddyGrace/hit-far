@@ -74,17 +74,20 @@ def test_minimums_gate_training():
 # --- End to end: tag -> automatic training -> promotion -> analysis ----------------------------
 
 
-def _make_swings(n, seed=0):
+def _make_swings(n, seed=0, username="owner"):
     """Swings with metrics but no video processing; 'shoulders_open@impact' drives slicing."""
     from datetime import datetime, timezone
 
+    from sqlalchemy import select
+
     from app.db import get_sessionmaker
-    from app.models import Metric, RecordingSession, Swing, Video, VideoStatus
+    from app.models import Metric, RecordingSession, Swing, User, Video, VideoStatus
 
     rng = np.random.default_rng(seed)
     out = []
     with get_sessionmaker()() as db:
-        sess = RecordingSession(recorded_at=datetime.now(timezone.utc))
+        uid = db.scalar(select(User.id).where(User.username == username))
+        sess = RecordingSession(recorded_at=datetime.now(timezone.utc), user_id=uid)
         db.add(sess)
         db.flush()
         for i in range(n):
@@ -285,17 +288,18 @@ def test_wrist_bow_and_forearm_roll(target_dir, roll_top):
     assert "shoulders_open" in names
 
 
-def test_only_face_on_swings_feed_the_outcome_models(engine):
+def test_only_face_on_swings_feed_the_outcome_models(authed):
     from app.db import get_sessionmaker
-    from app.models import CameraRole, Swing, Video
+    from app.models import CameraRole, RecordingSession, Swing, Video
     from app.outcomes.features import load_table
 
     ids = [sid for sid, _ in _make_swings(4, seed=5)]
     with get_sessionmaker()() as db:
-        dtl = db.get(Video, db.get(Swing, ids[0]).video_ids[0])
+        swing = db.get(Swing, ids[0])
+        dtl = db.get(Video, swing.video_ids[0])
         dtl.camera_role = CameraRole.down_the_line
         db.commit()
-        table = load_table(db)
+        table = load_table(db, db.get(RecordingSession, swing.session_id).user_id)
     assert ids[0] not in table.swing_ids and set(ids[1:]) <= set(table.swing_ids)
 
 

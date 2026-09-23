@@ -27,6 +27,13 @@ async def lifespan(app: FastAPI):
     s = get_settings()
     try:
         from app.db import get_sessionmaker
+
+        with get_sessionmaker()() as db:
+            auth.bootstrap_users(db, s)
+    except Exception:
+        log.exception("could not set up users")
+    try:
+        from app.db import get_sessionmaker
         from app.diagnosis.catalog import upsert_catalog
 
         with get_sessionmaker()() as db:
@@ -43,7 +50,7 @@ async def lifespan(app: FastAPI):
         except Exception:
             log.exception("could not queue start-up jobs")
     if s.app_password == "changeme":
-        log.warning("APP_PASSWORD is the default; set it before deploying")
+        log.warning("APP_PASSWORD is the default; set it before deploying (it seeds the first user's password)")
     if s.storage_backend == "s3" and s.public_origin:
         try:
             st = get_storage()

@@ -98,6 +98,21 @@ class JobStatus(str, enum.Enum):
     failed = "failed"
 
 
+# --- Users -------------------------------------------------------------------------------------
+
+
+class User(Base):
+    """A golfer who logs in. Sessions (and so videos, swings, outcomes) belong to one user, as do
+    that user's outcome models. Shared models (pose, events, club) learn from everyone's swings."""
+
+    __tablename__ = "users"
+
+    id: Mapped[uuid.UUID] = _pk()
+    username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = _created()
+
+
 # --- Raw capture -------------------------------------------------------------------------------
 
 
@@ -105,6 +120,8 @@ class RecordingSession(Base):
     __tablename__ = "sessions"
 
     id: Mapped[uuid.UUID] = _pk()
+    # Nullable only for rows from before users existed; API start-up assigns those to the first user.
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), index=True)
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     location: Mapped[str | None] = mapped_column(String(200))
     club_used: Mapped[str | None] = mapped_column(String(50))
@@ -208,6 +225,8 @@ class Dataset(Base):
     source: Mapped[DatasetSource] = mapped_column(_pg_enum(DatasetSource, "dataset_source"), nullable=False)
     manifest_uri: Mapped[str | None] = mapped_column(String(500))
     num_samples: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # Set for per-golfer datasets (outcomes); null for shared ones.
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     created_at: Mapped[datetime] = _created()
 
 
@@ -226,6 +245,8 @@ class Model(Base):
         _pg_enum(ModelStatus, "model_status"), default=ModelStatus.experimental, nullable=False
     )
     notes: Mapped[str | None] = mapped_column(Text)
+    # Set for per-golfer models (outcome models); null for shared ones (pose, events, club).
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     created_at: Mapped[datetime] = _created()
 
 
