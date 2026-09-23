@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.models import (
+    ClubTrack,
     EventType,
     Label,
     Metric,
@@ -27,16 +28,18 @@ from app.models import (
     Video,
     VideoStatus,
 )
+from app.pipeline import club as club_mod
 from app.pipeline import events as events_mod
 from app.pipeline import ingest, pose as pose_mod
 from app.pipeline.metrics import PIPELINE_VERSION, compute_metrics
 from app.pipeline.posedata import PoseData
-from app.pipeline.registry import TASK_EVENTS, TASK_POSE_2D, get_or_create_model
+from app.pipeline.registry import TASK_CLUB, TASK_EVENTS, TASK_POSE_2D, get_or_create_model
 from app.storage import get_storage
 
 log = logging.getLogger(__name__)
 
 EVENT_LABEL_TASK = "event"
+CLUB_LABEL_TASK = "club"
 
 
 class PermanentError(Exception):
@@ -170,6 +173,87 @@ def run_event_stage(db: Session, swing: Swing, pose: PoseData) -> None:
     db.commit()
 
 
+def club_model(db: Session) -> Model:
+    return get_or_create_model(db, club_mod.MODEL_NAME, club_mod.MODEL_VERSION, TASK_CLUB,
+                               notes="Label-free shaft-line tracker (stage 1): ridge search around the hands")
+
+
+def run_club_stage(db: Session, swing: Swing, video: Video, workdir: Path, pose: PoseData,
+                   force: bool = False) -> ClubTrack | None:
+    """Track the shaft. Never fails the swing: a tracker problem just means no club metrics."""
+    model = club_model(db)
+    existing = db.scalar(select(ClubTrack).where(ClubTrack.swing_id == swing.id, ClubTrack.model_id == model.id)
+                         .order_by(ClubTrack.created_at.desc()).limit(1))
+    if existing is not None and not force:
+        return existing
+    try:
+        proxy = workdir / "proxy.mp4"
+        if not proxy.exists():
+            get_storage().download_file(video.proxy_uri, proxy)
+        window = club_mod.window_from_events(effective_events(db, swing.id), pose.num_frames, pose.fps)
+        track = club_mod.track_shaft(proxy, pose, window)
+    except Exception:
+        log.exception("club tracking failed for swing %s", swing.id)
+        return None
+    key = f"artifacts/{swing.id}/{model.id}/club-{uuid.uuid4()}.npz"
+    get_storage().put_bytes(key, track.to_npz())
+    row = ClubTrack(swing_id=swing.id, video_id=video.id, model_id=model.id, track_uri=key,
+                    num_frames=track.num_frames)
+    db.add(row)
+    db.commit()
+    return row
+
+
+def latest_club_track(db: Session, swing_id: uuid.UUID) -> ClubTrack | None:
+    return db.scalar(select(ClubTrack).where(ClubTrack.swing_id == swing_id)
+                     .order_by(ClubTrack.created_at.desc()).limit(1))
+
+
+def club_corrections(db: Session, swing_id: uuid.UUID) -> dict[int, float]:
+    """Latest correction per frame (degrees); a null angle reverts to the tracker."""
+    rows = db.scalars(select(Label).where(Label.task == CLUB_LABEL_TASK, Label.target_type == "swing",
+                                          Label.target_id == swing_id).order_by(Label.created_at)).all()
+    out: dict[int, float] = {}
+    for r in rows:
+        f = int(r.corrected_value["frame_index"])
+        if r.corrected_value.get("angle_deg") is None:
+            out.pop(f, None)
+        else:
+            out[f] = float(r.corrected_value["angle_deg"])
+    return out
+
+
+def effective_club(db: Session, swing_id: uuid.UUID) -> club_mod.ShaftTrack | None:
+    row = latest_club_track(db, swing_id)
+    if row is None:
+        return None
+    track = club_mod.ShaftTrack.from_npz(get_storage().get_bytes(row.track_uri))
+    return club_mod.apply_corrections(track, club_corrections(db, swing_id))
+
+
+def track_club(db: Session, swing_id: uuid.UUID, on_stage: Callable[[str], None] = lambda s: None) -> None:
+    """Worker job: (re)track the shaft for one existing swing, then refresh its metrics."""
+    swing = db.get(Swing, swing_id)
+    seq = latest_pose_sequence(db, swing_id) if swing else None
+    if seq is None:
+        raise PermanentError(f"swing {swing_id} has no pose yet")
+    video = db.get(Video, swing.video_ids[0])
+    pose = load_pose(seq)
+    with tempfile.TemporaryDirectory(prefix="hitfar-") as tmp:
+        on_stage("club")
+        run_club_stage(db, swing, video, Path(tmp), pose, force=True)
+    recompute_metrics(db, swing, pose)
+
+
+def swings_needing_club(db: Session) -> list[uuid.UUID]:
+    """Swings with pose but no track from the current tracker version."""
+    model = club_model(db)
+    db.commit()
+    has_pose = select(PoseSequence.swing_id).distinct()
+    tracked = select(ClubTrack.swing_id).where(ClubTrack.model_id == model.id).distinct()
+    return list(db.scalars(select(Swing.id).where(Swing.id.in_(has_pose), Swing.id.not_in(tracked))).all())
+
+
 def redetect_events(db: Session, swing_id: uuid.UUID) -> None:
     """Re-run event detection with the currently active model (reuses cached pose)."""
     swing = db.get(Swing, swing_id)
@@ -235,7 +319,8 @@ def recompute_metrics(db: Session, swing: Swing, pose: PoseData | None = None) -
         if seq is None:
             return []
         pose = load_pose(seq)
-    values = compute_metrics(pose, effective_events(db, swing.id), get_settings().golfer_handedness)
+    values = compute_metrics(pose, effective_events(db, swing.id), get_settings().golfer_handedness,
+                             club=effective_club(db, swing.id))
     db.execute(delete(Metric).where(Metric.swing_id == swing.id, Metric.pipeline_version == PIPELINE_VERSION))
     rows = [
         Metric(swing_id=swing.id, pipeline_version=PIPELINE_VERSION, metric_name=v.metric_name,
@@ -290,5 +375,7 @@ def process_video(db: Session, video_id: uuid.UUID, force: bool = False,
         pose = load_pose(seq)
         on_stage("events")
         run_event_stage(db, swing, pose)
+        on_stage("club")
+        run_club_stage(db, swing, video, workdir, pose, force=force)
         on_stage("metrics")
         recompute_metrics(db, swing, pose)

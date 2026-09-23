@@ -13,7 +13,10 @@ from app.outcomes.service import get_outcome
 from app.pipeline.landmarks import CONNECTIONS
 from app.pipeline.metrics import PIPELINE_VERSION
 from app.pipeline.run import (
+    CLUB_LABEL_TASK,
     EVENT_LABEL_TASK,
+    club_corrections,
+    effective_club,
     event_corrections,
     latest_pose_sequence,
     load_pose,
@@ -21,6 +24,8 @@ from app.pipeline.run import (
     recompute_metrics,
 )
 from app.schemas import (
+    ClubCorrectionIn,
+    ClubFrames,
     EventCorrectionIn,
     EventOut,
     JobOut,
@@ -161,6 +166,46 @@ def correct_event(swing_id: uuid.UUID, event_type: EventType, body: EventCorrect
             "video_id": str(video.id),
         },
     ))
+    db.commit()
+    recompute_metrics(db, swing)
+    return swing_detail(db, swing)
+
+
+@router.get("/{swing_id}/club", response_model=ClubFrames)
+def get_club(swing_id: uuid.UUID, db: Session = Depends(get_db)):
+    swing = get_swing_or_404(db, swing_id)
+    track = effective_club(db, swing.id)
+    if track is None:
+        raise HTTPException(404, "no club track for this swing yet")
+    corr = club_corrections(db, swing.id)
+    return ClubFrames(
+        fps=track.fps, length_px=round(track.length_px, 1),
+        angle_deg=[None if not math.isfinite(a) else round(math.degrees(a) % 360, 1) for a in track.angle],
+        confidence=[round(float(c), 2) for c in track.confidence],
+        grip=[None if not all(map(math.isfinite, g)) else [round(float(g[0]), 1), round(float(g[1]), 1)]
+              for g in track.grip],
+        corrected=sorted(corr),
+    )
+
+
+@router.put("/{swing_id}/club/{frame_index}", response_model=SwingDetail)
+def correct_club(swing_id: uuid.UUID, frame_index: int, body: ClubCorrectionIn, db: Session = Depends(get_db)):
+    """Set the shaft direction on one frame (degrees, image plane, grip -> clubhead, 0 = right,
+    90 = down). null reverts that frame to the tracker. Corrections are future training data."""
+    swing = get_swing_or_404(db, swing_id)
+    video = _primary_video(db, swing)
+    if video.num_frames and not 0 <= frame_index < video.num_frames:
+        raise HTTPException(400, f"frame_index must be in [0, {video.num_frames})")
+    track = effective_club(db, swing.id)
+    if track is None:
+        raise HTTPException(409, "no club track for this swing yet")
+    predicted = track.angle[frame_index] if frame_index < len(track.angle) else float("nan")
+    db.add(Label(task=CLUB_LABEL_TASK, target_type="swing", target_id=swing.id, corrected_value={
+        "frame_index": frame_index,
+        "angle_deg": None if body.angle_deg is None else body.angle_deg % 360,
+        "predicted_angle_deg": round(math.degrees(predicted) % 360, 2) if math.isfinite(predicted) else None,
+        "video_id": str(video.id),
+    }))
     db.commit()
     recompute_metrics(db, swing)
     return swing_detail(db, swing)

@@ -194,7 +194,13 @@ These tables are already in the schema; the code for them is still to come.
 
 1. **Trained event model:** the first GolfDB run is queued automatically on deploy and promotes itself if it beats the rules.
 2. **Pose fine-tuning.** Fine-tune the keypoint model with a Label Studio round-trip for occluded and blurred frames (the top of the backswing, impact).
-3. **Club/shaft tracking: the next build (pending).** Detect the shaft (and later the clubhead) in each frame, bootstrapped from a few hand-labelled frames and grown through the correction loop. This gives real wrist hinge and lag (the forearm-to-shaft angle), shaft lean at impact, and the shaft's rotation through impact as a much better clubface-closing signal than the hand-point forearm roll. The new metrics feed the outcome models directly (hook and slice especially), and shaft-parallel events stop using arm proxies.
+3. **Club tracking.**
+   - **Stage 1 is built:** a label-free shaft-line tracker. The shaft is found as the strongest thin straight line leaving the hands, measured against a median background so static range clutter drops out, and smoothed over time with dynamic programming. It has a per-frame confidence that also falls when the shaft sweeps too far between frames.
+     - Metrics come only from confident frames: shaft lean at address and impact, past-parallel at the top, wrist hinge at the top, lag at mid-downswing, and release speed at impact.
+     - To correct a frame, click **Fix shaft on this frame**, then click the clubhead. Corrections are saved as `labels` rows (`task=club`).
+     - Record at **240 fps**. At low frame rates the shaft is a blur near impact, and those frames are flagged rather than guessed.
+   - **Stage 2 (next):** a learned grip-and-clubhead detector, trained on the tracker's confident frames plus your corrections.
+   - **Stage 3:** clubhead and face orientation. A shaft line seen face-on can't show the face rotating, which is the real hook signal.
 4. **Dual-camera calibration sessions.** Sync two cameras by clap or flash, then triangulate. Use the triangulated poses to fine-tune the monocular lifter and to fill `pose_3d_sequences.error_estimate`.
 5. **Reference profiles and comparison.** Compare against archetypes or your own reference swings, with DTW event alignment and per-metric deltas.
 6. **Outcome models, next steps:** use launch-monitor face and path numbers as targets when present, and add club and face features once club tracking exists.

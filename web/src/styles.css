@@ -105,6 +105,7 @@ label.inline { flex-direction: row; align-items: center; gap: 0.35rem; color: va
 .video-wrap { position: relative; background: #000; border-radius: 8px; overflow: hidden; }
 .video-wrap video { display: block; width: 100%; max-height: 72vh; object-fit: contain; }
 .video-wrap canvas { position: absolute; left: 0; top: 0; pointer-events: none; }
+.video-wrap canvas.picking { pointer-events: auto; cursor: crosshair; }
 .controls { display: flex; gap: 0.5rem; align-items: center; margin: 0.5rem 0; flex-wrap: wrap; }
 .frame-info { margin-left: auto; font-variant-numeric: tabular-nums; font-size: 0.85rem; color: var(--muted); }
 
@@ -202,3 +203,7 @@ button.chip.outcome.on.fade, button.chip.outcome.on.draw { background: var(--war
 .ci.weak { stroke: var(--warn); }
 .point.ok { fill: var(--accent); }
 .point.weak { fill: var(--warn); }
+
+/* Club */
+.club-row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; font-size: 0.85rem; }
+button.on { background: var(--blue-soft); color: var(--blue); border-color: var(--blue); }

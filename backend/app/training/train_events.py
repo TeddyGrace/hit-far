@@ -7,7 +7,6 @@ The new model is registered `experimental`; promoting it to `active` is a separa
 import io
 import json
 import logging
-import os
 import random
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
@@ -19,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from app import jobs
 from app.config import get_settings
+from app.resources import available_cpus
 from app.models import EVENT_ORDER, Dataset, DatasetSource, Label, Model, ModelStatus, Swing
 from app.pipeline import events as rule_events
 from app.pipeline.registry import TASK_EVENTS
@@ -273,7 +273,7 @@ def run_training(db: Session, payload: dict, on_stage: Callable[[str], None] = l
 
     cfg = TrainConfig(**payload.get("config", {}))
     s = get_settings()
-    torch.set_num_threads(s.train_workers or os.cpu_count() or 1)
+    torch.set_num_threads(s.train_workers or available_cpus())
     on_stage("loading data")
     samples: list[Sample] = []
     info: dict = {}

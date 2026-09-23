@@ -89,7 +89,7 @@ def test_full_pipeline_and_event_correction(authed, sample_video, fake_pose):
     assert not top3["corrected"] and top3["frame_index"] == top["frame_index"]
 
     models = authed.get("/api/models").json()
-    assert {m["name"] for m in models} == {"mediapipe-pose-landmarker-heavy", "rule-events"}
+    assert {m["name"] for m in models} == {"mediapipe-pose-landmarker-heavy", "rule-events", "shaft-line-tracker"}
 
 
 def test_duplicate_upload_is_rejected(authed, sample_video, fake_pose):

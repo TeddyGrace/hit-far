@@ -7,6 +7,7 @@ from app.models import Model, ModelStatus
 
 TASK_POSE_2D = "pose_2d"
 TASK_EVENTS = "event_segmentation"
+TASK_CLUB = "club_tracking"
 
 
 def get_or_create_model(

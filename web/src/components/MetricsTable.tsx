@@ -26,6 +26,11 @@ export const NAMES: Record<string, string> = {
   lead_wrist_hinge: "Lead wrist hinge (+ cocked)",
   lead_forearm_roll: "Forearm roll (+ = rotated closed vs address)",
   forearm_roll_speed: "Forearm roll speed (+ = closing)",
+  shaft_lean: "Shaft lean (+ = hands ahead)",
+  shaft_past_parallel: "Shaft past parallel (+ past, − short)",
+  wrist_hinge_shaft: "Wrist hinge (forearm–shaft angle)",
+  lag_angle: "Lag (forearm–shaft angle)",
+  shaft_release_speed: "Shaft release speed through impact",
 };
 
 /** "shoulders_open@impact" -> "Shoulders open (…) at Impact". */

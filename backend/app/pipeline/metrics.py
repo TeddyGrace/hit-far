@@ -25,6 +25,16 @@ grip and blur near impact), so each is emitted only where those points are visib
     torso and to address, oriented by the golfer's own backswing: negative = rotated the way the
     backswing rotates it (face opening), positive = rotated back past address (face closing).
   * forearm_roll_speed: how fast that rotation is closing at impact.
+
+0.4.0 adds club metrics from the shaft-line tracker (2D, image plane, face-on), each emitted only
+on frames tracked with confidence >= 0.5 (your corrections count as certain):
+  * shaft_lean at address and impact: + = hands ahead of the clubhead (forward lean).
+  * shaft_past_parallel at the top: 0 = parallel to the ground, + = past parallel.
+  * wrist_hinge_shaft at the top and lag_angle at mid-downswing: angle between the lead forearm
+    and the shaft (0 = in line, 90 = an L).
+  * shaft_release_speed at impact: how fast the shaft is rotating through impact in the
+    downswing direction (a flip/cast shows up here). It is NOT face rotation: a shaft line seen
+    face-on can't show the face turning about the shaft.
 """
 
 from dataclasses import dataclass
@@ -47,7 +57,7 @@ from app.pipeline.landmarks import (
 )
 from app.pipeline.posedata import PoseData
 
-PIPELINE_VERSION = "0.3.0"
+PIPELINE_VERSION = "0.4.0"
 
 E = EventType
 
@@ -174,7 +184,45 @@ def _wrist_metrics(world: np.ndarray, vis: np.ndarray, events: dict, lead, trail
         add("forearm_roll_speed", E.impact, (closing[hi] - closing[lo]) / ((hi - lo) / fps), "deg/s", True)
 
 
-def compute_metrics(pose: PoseData, events: dict[EventType, int], handedness: str = "right") -> list[MetricValue]:
+def _club_metrics(kp: np.ndarray, club, events: dict, lead, target_sign: float, fps: float, add) -> None:
+    ang, conf = club.angle, club.confidence
+    T = len(ang)
+
+    def ok(f) -> bool:
+        return f is not None and 0 <= f < T and bool(np.isfinite(ang[f])) and conf[f] >= 0.5
+
+    def d(f) -> np.ndarray:
+        return np.array([np.cos(ang[f]), np.sin(ang[f])])
+
+    for ev in (E.address, E.impact):
+        f = events.get(ev)
+        if ok(f):
+            dx, dy = d(f)
+            add("shaft_lean", ev, np.degrees(np.arctan2(-dx * target_sign, dy)), "deg")
+    t = events.get(E.top)
+    if ok(t):
+        dx, dy = d(t)
+        add("shaft_past_parallel", E.top, np.degrees(np.arctan2(dy, dx * target_sign)), "deg")
+    for ev, name in ((E.top, "wrist_hinge_shaft"), (E.mid_downswing, "lag_angle")):
+        f = events.get(ev)
+        if ok(f):
+            fa = kp[f, lead.wrist] - kp[f, lead.elbow]
+            n = np.linalg.norm(fa)
+            if n > 1:
+                add(name, ev, np.degrees(np.arccos(np.clip(fa @ d(f) / n, -1, 1))), "deg")
+    i, md = events.get(E.impact), events.get(E.mid_downswing)
+    if i is not None and md is not None and t is not None and md < i:
+        k = max(1, int(round(0.02 * fps)))
+        lo, hi = i - k, i + k
+        if lo >= 0 and hi < T and all(ok(f) for f in range(lo, hi + 1)) and ok(md):
+            un = np.unwrap(ang[md:hi + 1])
+            direction = np.sign(un[i - md] - un[0]) or 1.0
+            add("shaft_release_speed", E.impact, np.degrees(un[-1] - un[lo - md]) * direction / ((hi - lo) / fps),
+                "deg/s")
+
+
+def compute_metrics(pose: PoseData, events: dict[EventType, int], handedness: str = "right",
+                    club=None) -> list[MetricValue]:
     lead, trail = sides(handedness)
     sigma = max(0.5, pose.fps * 0.005)
     kp = smooth(interpolate_nans(pose.kp2d), sigma)
@@ -238,6 +286,9 @@ def compute_metrics(pose: PoseData, events: dict[EventType, int], handedness: st
             # Shaft-lean proxy: hands ahead of where they were at address (roughly over the ball).
             add("hands_ahead", E.impact, (hands[i, 0] - hands[a, 0]) * target_sign / shoulder_w * 100,
                 "% shoulder width")
+
+    if club is not None:
+        _club_metrics(kp, club, events, lead, target_sign, fps, add)
 
     # --- 3D (monocular estimate)
     if has_world:

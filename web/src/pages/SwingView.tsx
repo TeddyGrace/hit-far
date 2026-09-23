@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, EVENT_LABELS, EVENT_TYPES, EventType, PoseFrames, Prediction, SwingDetail } from "../api";
+import { api, ClubFrames, EVENT_LABELS, EVENT_TYPES, EventType, PoseFrames, Prediction, SwingDetail } from "../api";
 import DiagnosisPanel from "../components/DiagnosisPanel";
 import EventTimeline, { REVIEW_THRESHOLD } from "../components/EventTimeline";
 import MetricsTable from "../components/MetricsTable";
@@ -15,6 +15,9 @@ export default function SwingView() {
   const [swing, setSwing] = useState<SwingDetail | null>(null);
   const [pose, setPose] = useState<PoseFrames | null>(null);
   const [predictions, setPredictions] = useState<Prediction[] | null>(null);
+  const [club, setClub] = useState<ClubFrames | null>(null);
+  const [showClub, setShowClub] = useState(true);
+  const [picking, setPicking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [frame, setFrame] = useState(0);
   const [rate, setRate] = useState(0.25);
@@ -30,7 +33,25 @@ export default function SwingView() {
     api.getSwing(id).then(setSwing, (e) => setError(e.message));
     api.getPose(id).then(setPose, () => setPose(null));
     api.swingPredictions(id).then(setPredictions, () => setPredictions(null));
+    api.getClub(id).then(setClub, () => setClub(null));
   }, [id]);
+
+  const setShaft = useCallback(
+    async (f: number, angle: number | null) => {
+      if (!id) return;
+      setSaving(true);
+      try {
+        setSwing(await api.correctClub(id, f, angle));
+        setClub(await api.getClub(id));
+      } catch (e) {
+        setError((e as Error).message);
+      } finally {
+        setSaving(false);
+        setPicking(false);
+      }
+    },
+    [id],
+  );
 
   useEffect(() => {
     const url = swing?.video.playback_url;
@@ -149,6 +170,16 @@ export default function SwingView() {
               showSkeleton={showSkeleton}
               videoRef={videoRef}
               onFrame={setFrame}
+              club={club}
+              showClub={showClub}
+              onPick={
+                picking && club?.grip[frame]
+                  ? (x, y) => {
+                      const g = club.grip[frame]!;
+                      setShaft(frame, (Math.atan2(y - g[1], x - g[0]) * 180) / Math.PI);
+                    }
+                  : null
+              }
             />
           ) : (
             <p className="muted">No playback video.</p>
@@ -180,11 +211,36 @@ export default function SwingView() {
               <input type="checkbox" checked={showSkeleton} onChange={(e) => setShowSkeleton(e.target.checked)} />
               Skeleton
             </label>
+            {club && (
+              <label className="inline">
+                <input type="checkbox" checked={showClub} onChange={(e) => setShowClub(e.target.checked)} />
+                Shaft
+              </label>
+            )}
             <span className="frame-info">
               frame {frame} / {numFrames - 1} · {(frame / fps).toFixed(3)} s
               {address != null && ` · ${(((frame - address) / fps) * 1000).toFixed(0)} ms from address`}
             </span>
           </div>
+          {club && (
+            <div className="club-row">
+              <span className="muted">
+                Shaft{" "}
+                {club.angle_deg[frame] == null
+                  ? "not tracked on this frame"
+                  : club.corrected.includes(frame)
+                    ? "set by you"
+                    : `confidence ${(club.confidence[frame] ?? 0).toFixed(2)}${(club.confidence[frame] ?? 0) < 0.5 ? " (not used for metrics)" : ""}`}
+              </span>
+              <button className={`small ${picking ? "on" : ""}`} disabled={!club.grip[frame] || saving}
+                onClick={() => setPicking((p) => !p)}>
+                {picking ? "Click the clubhead…" : "Fix shaft on this frame"}
+              </button>
+              {club.corrected.includes(frame) && (
+                <button className="link small" onClick={() => setShaft(frame, null)}>revert</button>
+              )}
+            </div>
+          )}
           <EventTimeline
             numFrames={numFrames}
             frame={frame}

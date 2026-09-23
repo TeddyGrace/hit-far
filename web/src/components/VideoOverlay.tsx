@@ -1,5 +1,5 @@
 import { RefObject, useEffect, useRef } from "react";
-import { PoseFrames } from "../api";
+import { ClubFrames, PoseFrames } from "../api";
 
 const LOW_VIS = 0.5;
 
@@ -12,13 +12,21 @@ interface Props {
   showSkeleton: boolean;
   videoRef: RefObject<HTMLVideoElement | null>;
   onFrame: (frame: number) => void;
+  club?: ClubFrames | null;
+  showClub?: boolean;
+  /** When set, clicks on the video report the point in video pixels (used to set the shaft). */
+  onPick?: ((x: number, y: number) => void) | null;
 }
+
+const CLUB_CONF = 0.5;
 
 /**
  * <video> with a canvas skeleton on top. Frame index = round(mediaTime * fps), which matches the
  * backend because pose was run on this exact constant-frame-rate proxy.
  */
-export default function VideoOverlay({ src, fps, numFrames, pose, frame, showSkeleton, videoRef, onFrame }: Props) {
+export default function VideoOverlay({
+  src, fps, numFrames, pose, frame, showSkeleton, videoRef, onFrame, club, showClub = true, onPick,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // Track the displayed frame.
@@ -63,13 +71,30 @@ export default function VideoOverlay({ src, fps, numFrames, pose, frame, showSke
       const ctx = canvas.getContext("2d")!;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, w, h);
-      const kp = pose?.frames[frame];
-      if (!showSkeleton || !pose || !kp) return;
-
+      if (!pose) return;
       // object-fit: contain letterboxing
       const scale = Math.min(w / pose.width, h / pose.height);
       const ox = (w - pose.width * scale) / 2;
       const oy = (h - pose.height * scale) / 2;
+
+      const g = club?.grip[frame];
+      const a = club?.angle_deg[frame];
+      if (showClub && club && g && a != null) {
+        const rad = (a * Math.PI) / 180;
+        const conf = club.confidence[frame] ?? 0;
+        const corrected = club.corrected.includes(frame);
+        ctx.strokeStyle = corrected ? "#5aa9ff" : conf >= CLUB_CONF ? "#ffd84a" : "rgba(255,140,60,0.8)";
+        ctx.setLineDash(corrected || conf >= CLUB_CONF ? [] : [6, 5]);
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(ox + g[0] * scale, oy + g[1] * scale);
+        ctx.lineTo(ox + (g[0] + Math.cos(rad) * club.length_px) * scale, oy + (g[1] + Math.sin(rad) * club.length_px) * scale);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      const kp = pose.frames[frame];
+      if (!showSkeleton || !kp) return;
       const P = (j: number) => [ox + kp[j * 3] * scale, oy + kp[j * 3 + 1] * scale, kp[j * 3 + 2]] as const;
 
       ctx.lineWidth = 3;
@@ -97,12 +122,23 @@ export default function VideoOverlay({ src, fps, numFrames, pose, frame, showSke
     const ro = new ResizeObserver(draw);
     ro.observe(video);
     return () => ro.disconnect();
-  }, [videoRef, pose, frame, showSkeleton]);
+  }, [videoRef, pose, frame, showSkeleton, club, showClub]);
 
   return (
     <div className="video-wrap">
       <video ref={videoRef} src={src} playsInline muted preload="auto" />
-      <canvas ref={canvasRef} />
+      <canvas
+        ref={canvasRef}
+        className={onPick ? "picking" : ""}
+        onClick={(e) => {
+          if (!onPick || !pose) return;
+          const r = e.currentTarget.getBoundingClientRect();
+          const scale = Math.min(r.width / pose.width, r.height / pose.height);
+          const ox = (r.width - pose.width * scale) / 2;
+          const oy = (r.height - pose.height * scale) / 2;
+          onPick((e.clientX - r.left - ox) / scale, (e.clientY - r.top - oy) / scale);
+        }}
+      />
     </div>
   );
 }

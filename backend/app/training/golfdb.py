@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.config import get_settings
+from app.resources import pose_workers
 from app.pipeline.posedata import PoseData
 from app.storage import get_storage
 
@@ -124,7 +125,7 @@ def ensure_pose(clips: list[Clip], progress: Callable[[str], None] = lambda s: N
                 tasks.append((c.id, str(p)))
             else:
                 errors[c.id] = "clip missing from zip"
-        workers = workers or get_settings().train_workers or os.cpu_count() or 1
+        workers = workers or get_settings().train_workers or pose_workers()
         done = 0
         with ProcessPoolExecutor(max_workers=workers) as pool:
             futures = [pool.submit(_extract_one, t) for t in tasks]

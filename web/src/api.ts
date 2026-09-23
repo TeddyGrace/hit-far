@@ -130,6 +130,15 @@ export interface PoseFrames {
   frames: (number[] | null)[];
 }
 
+export interface ClubFrames {
+  fps: number;
+  length_px: number;
+  angle_deg: (number | null)[];
+  confidence: number[];
+  grip: ([number, number] | null)[];
+  corrected: number[];
+}
+
 export type Verdict = "confirmed" | "rejected" | "unsure";
 export type Labeler = "self" | "instructor";
 
@@ -350,6 +359,10 @@ export const api = {
   getPose: (id: string) => request<PoseFrames>("GET", `/api/swings/${id}/pose`),
   correctEvent: (id: string, event: EventType, frame_index: number | null) =>
     request<SwingDetail>("PUT", `/api/swings/${id}/events/${event}`, { frame_index }),
+
+  getClub: (id: string) => request<ClubFrames>("GET", `/api/swings/${id}/club`),
+  correctClub: (id: string, frame: number, angle_deg: number | null) =>
+    request<SwingDetail>("PUT", `/api/swings/${id}/club/${frame}`, { angle_deg }),
 
   listModels: () => request<ModelInfo[]>("GET", "/api/models"),
 

@@ -14,7 +14,13 @@ import uuid
 from app import jobs
 from app.config import get_settings
 from app.db import get_sessionmaker
-from app.pipeline.run import PermanentError, process_video, recompute_all_metrics, redetect_events
+from app.pipeline.run import (
+    PermanentError,
+    process_video,
+    recompute_all_metrics,
+    redetect_events,
+    track_club,
+)
 
 log = logging.getLogger("hitfar.worker")
 _stop = False
@@ -41,6 +47,12 @@ def run_job(job_id: uuid.UUID, type_: str, payload: dict) -> None:
             from app.outcomes.service import maybe_queue_training
 
             maybe_queue_training(db, force=True)  # features changed: retrain outcome models
+        elif type_ == jobs.JOB_TRACK_CLUB:
+            track_club(db, uuid.UUID(payload["swing_id"]), on_stage=on_stage)
+            from app.outcomes.service import maybe_queue_training
+
+            if payload.get("retrain_after"):
+                maybe_queue_training(db, force=True)
         elif type_ == jobs.JOB_TRAIN_OUTCOMES:
             from app.outcomes.service import run_outcome_training
 

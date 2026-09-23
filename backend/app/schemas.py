@@ -203,6 +203,19 @@ class PoseFrames(BaseModel):
     frames: list[list[float] | None]
 
 
+class ClubFrames(BaseModel):
+    fps: float
+    length_px: float
+    angle_deg: list[float | None]  # image plane, grip -> clubhead, 0 = +x (right), 90 = +y (down)
+    confidence: list[float]
+    grip: list[list[float] | None]
+    corrected: list[int]
+
+
+class ClubCorrectionIn(BaseModel):
+    angle_deg: float | None
+
+
 # --- Diagnosis ---------------------------------------------------------------------------------
 
 Verdict = Literal["confirmed", "rejected", "unsure"]

@@ -8,7 +8,7 @@ The golfer's main miss is a **hook / duck-hook**, and they suspect lead-wrist tw
 
 ## Club tracking plan (agreed with the user)
 
-- **Stage 1: in progress / built in this session.** A label-free shaft-line tracker in
+- **Stage 1: BUILT** (pipeline v0.4.0, tracker `shaft-line-tracker` 0.1.0). A label-free shaft-line tracker in
   `backend/app/pipeline/club.py`:
   - The shaft is found as the strongest thin straight ridge leaving the hands; the pose model
     provides the grip point.
@@ -18,6 +18,10 @@ The golfer's main miss is a **hook / duck-hook**, and they suspect lead-wrist tw
   - Club metrics are 2D and emitted only on confidently tracked frames: shaft lean, past-parallel,
     wrist hinge, lag, release speed.
   - Existing swings are tracked automatically by `track_club` jobs queued at API start-up.
+  - On synthetic video (clutter, motion blur, 120–240 fps) it is within about 3–7° on confident
+    frames. At 30 fps it reports low confidence at impact instead of guessing.
+  - It is not yet validated on real footage. Check it on the user's first range session: the
+    shaft line on the swing page, and the confidence it reports.
 - **Stage 2: pending. Do next, once the user has uploaded a few range sessions.** Train a learned
   shaft/clubhead detector (keypoints: grip end and clubhead) from the stage-1 tracker's
   high-confidence frames (pseudo-labels) plus the user's `task=club` corrections. Register it in
