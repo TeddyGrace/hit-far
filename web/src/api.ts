@@ -333,9 +333,10 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 export const api = {
-  login: (password: string) => request<{ ok: boolean }>("POST", "/api/auth/login", { password }),
+  login: (username: string, password: string) =>
+    request<{ ok: boolean; username: string }>("POST", "/api/auth/login", { username, password }),
   logout: () => request<{ ok: boolean }>("POST", "/api/auth/logout"),
-  me: () => request<{ ok: boolean }>("GET", "/api/auth/me"),
+  me: () => request<{ ok: boolean; username: string }>("GET", "/api/auth/me"),
 
   listSessions: () => request<SessionSummary[]>("GET", "/api/sessions"),
   createSession: (body: Partial<Pick<Session, "recorded_at" | "location" | "club_used" | "notes">>) =>

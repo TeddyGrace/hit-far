@@ -6,10 +6,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import jobs
-from app.auth import require_auth
+from app.auth import current_user, require_auth
 from app.db import get_db
-from app.models import Job, JobStatus, Label, Model, ModelStatus, Swing
+from app.models import Job, JobStatus, Label, Model, ModelStatus, Swing, User
 from app.pipeline.run import latest_pose_sequence
+from app.routers.models_registry import visible_models
 from app.routers.swings import get_swing_or_404, swing_detail
 from app.schemas import JobOut, ModelOut, SwingDetail
 from app.training.train_events import REVIEW_LABEL_TASK, reviewed_swing_ids
@@ -60,18 +61,20 @@ def training_status(db: Session = Depends(get_db)) -> dict:
 
 
 @router.post("/models/{model_id}/promote", response_model=list[ModelOut])
-def promote(model_id: uuid.UUID, db: Session = Depends(get_db)):
-    """Make this the active model for its task. The previously active model is kept (deprecated)
-    and can be promoted back at any time."""
+def promote(model_id: uuid.UUID, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    """Make this the active model for its task (for a per-golfer model: for its golfer). The
+    previously active model is kept (deprecated) and can be promoted back at any time."""
     m = db.get(Model, model_id)
-    if m is None:
+    if m is None or m.user_id not in (None, user.id):
         raise HTTPException(404, "model not found")
-    for other in db.scalars(select(Model).where(Model.task == m.task, Model.status == ModelStatus.active)).all():
+    same_owner = Model.user_id.is_(None) if m.user_id is None else Model.user_id == m.user_id
+    for other in db.scalars(select(Model).where(Model.task == m.task, same_owner,
+                                                Model.status == ModelStatus.active)).all():
         if other.id != m.id:
             other.status = ModelStatus.deprecated
     m.status = ModelStatus.active
     db.commit()
-    return db.scalars(select(Model).order_by(Model.task, Model.created_at.desc())).all()
+    return visible_models(db, user)
 
 
 @router.post("/swings/redetect-events", response_model=dict)
@@ -88,9 +91,10 @@ def redetect_all(db: Session = Depends(get_db)):
 
 
 @router.put("/swings/{swing_id}/review", response_model=SwingDetail)
-def set_reviewed(swing_id: uuid.UUID, body: ReviewIn, db: Session = Depends(get_db)):
+def set_reviewed(swing_id: uuid.UUID, body: ReviewIn, db: Session = Depends(get_db),
+                 user: User = Depends(current_user)):
     """Mark this swing's 8 events as checked by you - only reviewed swings become training data."""
-    swing = get_swing_or_404(db, swing_id)
+    swing = get_swing_or_404(db, swing_id, user)
     db.add(Label(task=REVIEW_LABEL_TASK, target_type="swing", target_id=swing.id,
                  corrected_value={"reviewed": body.reviewed}))
     db.commit()

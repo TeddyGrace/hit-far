@@ -6,9 +6,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import jobs
-from app.auth import require_auth
+from app.auth import current_user, require_auth
 from app.db import get_db
-from app.models import EVENT_ORDER, EventType, Label, Metric, Model, Swing, Video
+from app.models import EVENT_ORDER, EventType, Label, Metric, Model, RecordingSession, Swing, User, Video
 from app.outcomes.service import get_outcome
 from app.pipeline.landmarks import CONNECTIONS
 from app.pipeline.metrics import PIPELINE_VERSION
@@ -43,9 +43,9 @@ from app.storage import get_storage
 router = APIRouter(prefix="/api/swings", tags=["swings"], dependencies=[Depends(require_auth)])
 
 
-def get_swing_or_404(db: Session, swing_id: uuid.UUID) -> Swing:
+def get_swing_or_404(db: Session, swing_id: uuid.UUID, user: User) -> Swing:
     s = db.get(Swing, swing_id)
-    if s is None:
+    if s is None or db.get(RecordingSession, s.session_id).user_id != user.id:
         raise HTTPException(404, "swing not found")
     return s
 
@@ -116,13 +116,14 @@ def swing_detail(db: Session, swing: Swing) -> SwingDetail:
 
 
 @router.get("/{swing_id}", response_model=SwingDetail)
-def get_swing(swing_id: uuid.UUID, db: Session = Depends(get_db)):
-    return swing_detail(db, get_swing_or_404(db, swing_id))
+def get_swing(swing_id: uuid.UUID, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    return swing_detail(db, get_swing_or_404(db, swing_id, user))
 
 
 @router.patch("/{swing_id}", response_model=SwingDetail)
-def update_swing(swing_id: uuid.UUID, body: SwingPatch, db: Session = Depends(get_db)):
-    swing = get_swing_or_404(db, swing_id)
+def update_swing(swing_id: uuid.UUID, body: SwingPatch, db: Session = Depends(get_db),
+                 user: User = Depends(current_user)):
+    swing = get_swing_or_404(db, swing_id, user)
     for k, v in body.model_dump(exclude_unset=True).items():
         setattr(swing, k, v)
     db.commit()
@@ -130,8 +131,8 @@ def update_swing(swing_id: uuid.UUID, body: SwingPatch, db: Session = Depends(ge
 
 
 @router.get("/{swing_id}/pose", response_model=PoseFrames)
-def get_pose(swing_id: uuid.UUID, db: Session = Depends(get_db)):
-    swing = get_swing_or_404(db, swing_id)
+def get_pose(swing_id: uuid.UUID, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    swing = get_swing_or_404(db, swing_id, user)
     seq = latest_pose_sequence(db, swing.id)
     if seq is None:
         raise HTTPException(404, "no pose for this swing yet")
@@ -150,8 +151,9 @@ def get_pose(swing_id: uuid.UUID, db: Session = Depends(get_db)):
 
 
 @router.put("/{swing_id}/events/{event_type}", response_model=SwingDetail)
-def correct_event(swing_id: uuid.UUID, event_type: EventType, body: EventCorrectionIn, db: Session = Depends(get_db)):
-    swing = get_swing_or_404(db, swing_id)
+def correct_event(swing_id: uuid.UUID, event_type: EventType, body: EventCorrectionIn, db: Session = Depends(get_db),
+                  user: User = Depends(current_user)):
+    swing = get_swing_or_404(db, swing_id, user)
     video = _primary_video(db, swing)
     if body.frame_index is not None and video.num_frames and not 0 <= body.frame_index < video.num_frames:
         raise HTTPException(400, f"frame_index must be in [0, {video.num_frames})")
@@ -172,8 +174,8 @@ def correct_event(swing_id: uuid.UUID, event_type: EventType, body: EventCorrect
 
 
 @router.get("/{swing_id}/club", response_model=ClubFrames)
-def get_club(swing_id: uuid.UUID, db: Session = Depends(get_db)):
-    swing = get_swing_or_404(db, swing_id)
+def get_club(swing_id: uuid.UUID, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    swing = get_swing_or_404(db, swing_id, user)
     track = effective_club(db, swing.id)
     if track is None:
         raise HTTPException(404, "no club track for this swing yet")
@@ -189,10 +191,11 @@ def get_club(swing_id: uuid.UUID, db: Session = Depends(get_db)):
 
 
 @router.put("/{swing_id}/club/{frame_index}", response_model=SwingDetail)
-def correct_club(swing_id: uuid.UUID, frame_index: int, body: ClubCorrectionIn, db: Session = Depends(get_db)):
+def correct_club(swing_id: uuid.UUID, frame_index: int, body: ClubCorrectionIn, db: Session = Depends(get_db),
+                 user: User = Depends(current_user)):
     """Set the shaft direction on one frame (degrees, image plane, grip -> clubhead, 0 = right,
     90 = down). null reverts that frame to the tracker. Corrections are future training data."""
-    swing = get_swing_or_404(db, swing_id)
+    swing = get_swing_or_404(db, swing_id, user)
     video = _primary_video(db, swing)
     if video.num_frames and not 0 <= frame_index < video.num_frames:
         raise HTTPException(400, f"frame_index must be in [0, {video.num_frames})")

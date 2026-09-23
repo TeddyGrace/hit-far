@@ -23,8 +23,10 @@ from app.models import (
     Label,
     Model,
     ModelStatus,
+    RecordingSession,
     ShotOutcome,
     Swing,
+    User,
     Video,
 )
 from app.outcomes.features import Table, load_table, outcome_dict, select_features
@@ -69,7 +71,7 @@ def set_outcome(db: Session, swing: Swing, values: dict) -> ShotOutcome | None:
             db.delete(row)
         row = None
     db.commit()
-    maybe_queue_training(db)
+    maybe_queue_training(db, db.get(RecordingSession, swing.session_id).user_id)
     return row
 
 
@@ -77,26 +79,36 @@ def get_outcome(db: Session, swing_id: uuid.UUID) -> ShotOutcome | None:
     return db.scalar(select(ShotOutcome).where(ShotOutcome.swing_id == swing_id))
 
 
-def _last_training_dataset(db: Session) -> Dataset | None:
-    return db.scalar(select(Dataset).where(Dataset.task == DATASET_TASK).order_by(Dataset.created_at.desc()).limit(1))
+def _last_training_dataset(db: Session, user_id: uuid.UUID) -> Dataset | None:
+    return db.scalar(select(Dataset).where(Dataset.task == DATASET_TASK, Dataset.user_id == user_id)
+                     .order_by(Dataset.created_at.desc()).limit(1))
 
 
-def changes_since_training(db: Session) -> int:
-    last = _last_training_dataset(db)
-    q = select(func.count()).select_from(Label).where(Label.task == OUTCOME_LABEL_TASK)
+def changes_since_training(db: Session, user_id: uuid.UUID) -> int:
+    last = _last_training_dataset(db, user_id)
+    q = (select(func.count()).select_from(Label)
+         .join(Swing, Swing.id == Label.target_id).join(RecordingSession, RecordingSession.id == Swing.session_id)
+         .where(Label.task == OUTCOME_LABEL_TASK, RecordingSession.user_id == user_id))
     if last is not None:
         q = q.where(Label.created_at > last.created_at)
     return int(db.scalar(q) or 0)
 
 
-def maybe_queue_training(db: Session, force: bool = False) -> bool:
-    """Every N outcome changes (tags or edits), retrain. Cheap: seconds on the worker."""
-    n = changes_since_training(db)
+def maybe_queue_training(db: Session, user_id: uuid.UUID, force: bool = False) -> bool:
+    """Every N outcome changes (tags or edits), retrain this golfer's models. Cheap: seconds on the
+    worker."""
+    n = changes_since_training(db, user_id)
     if not force and (n == 0 or n < get_settings().outcome_retrain_every):
         return False
-    job = jobs.enqueue_once(db, jobs.JOB_TRAIN_OUTCOMES, {})
+    job = jobs.enqueue_once(db, jobs.JOB_TRAIN_OUTCOMES, {"user_id": str(user_id)})
     db.commit()
     return job is not None
+
+
+def queue_training_all(db: Session) -> None:
+    """Features changed for everyone (formula or tracker change): retrain every golfer's models."""
+    for uid in db.scalars(select(User.id)).all():
+        maybe_queue_training(db, uid, force=True)
 
 
 # --- Training ----------------------------------------------------------------------------------
@@ -126,20 +138,30 @@ def _cv_settings(overrides: dict | None) -> CVSettings:
     return CVSettings(**{k: v for k, v in (overrides or {}).items() if k in names})
 
 
-def active_outcome_model(db: Session, problem: str) -> Model | None:
-    return db.scalar(select(Model).where(Model.task == model_task(problem), Model.status == ModelStatus.active)
+def active_outcome_model(db: Session, problem: str, user_id: uuid.UUID) -> Model | None:
+    return db.scalar(select(Model).where(Model.task == model_task(problem), Model.user_id == user_id,
+                                         Model.status == ModelStatus.active)
                      .order_by(Model.created_at.desc()).limit(1))
 
 
 def run_outcome_training(db: Session, payload: dict | None = None,
                          on_stage: Callable[[str], None] = lambda s: None) -> dict:
+    """Train one golfer's outcome models (`payload["user_id"]`), or every golfer's when the payload
+    names none (jobs queued before users existed)."""
+    payload = payload or {}
+    if payload.get("user_id"):
+        return _train_user(db, uuid.UUID(payload["user_id"]), payload, on_stage)
+    return {str(uid): _train_user(db, uid, payload, on_stage) for uid in db.scalars(select(User.id)).all()}
+
+
+def _train_user(db: Session, user_id: uuid.UUID, payload: dict, on_stage: Callable[[str], None]) -> dict:
     """Train every problem that has enough tagged swings; auto-promote a new version when it scores
     at least as well as the active one on the same swings with the same protocol."""
     import joblib
 
-    cfg = _cv_settings((payload or {}).get("cv"))
+    cfg = _cv_settings(payload.get("cv"))
     on_stage("loading")
-    table = load_table(db)
+    table = load_table(db, user_id)
     all_names = sorted({n for v in table.values.values() for n in v})
     finfo = _feature_info(table)
     now = datetime.now(timezone.utc)
@@ -152,10 +174,10 @@ def run_outcome_training(db: Session, payload: dict | None = None,
         "swings": [{"swing_id": str(s), "outcome": table.outcomes[s],
                     "values": [table.values[s].get(n) for n in all_names]} for s in tagged],
     }
-    manifest_key = f"datasets/outcomes/{version}.json"
+    manifest_key = f"datasets/outcomes/{user_id}/{version}.json"
     st.put_bytes(manifest_key, json.dumps(manifest).encode(), "application/json")
     ds = Dataset(name=f"outcomes-{version}", task=DATASET_TASK, source=DatasetSource.self_labeled,
-                 manifest_uri=manifest_key, num_samples=len(tagged))
+                 manifest_uri=manifest_key, num_samples=len(tagged), user_id=user_id)
     db.add(ds)
     db.commit()
 
@@ -174,7 +196,7 @@ def run_outcome_training(db: Session, payload: dict | None = None,
         res = train_problem(X, y, names, [str(s) for s in ids], cfg, finfo)
 
         # Same-data comparison with the active model's recipe (model kind + feature set).
-        current = active_outcome_model(db, problem.key)
+        current = active_outcome_model(db, problem.key, user_id)
         promote, compared = True, None
         if current is not None and current.eval_metrics:
             old_kind = current.eval_metrics.get("kind")
@@ -193,18 +215,19 @@ def run_outcome_training(db: Session, payload: dict | None = None,
         joblib.dump({"estimator": res.estimator, "kind": res.kind, "features": names, "problem": problem.key,
                      "oof": res.oof, "factors": res.eval["factors"], "version": version,
                      "pipeline_version": PIPELINE_VERSION}, buf)
-        ckpt = f"models/{model_name(problem.key)}/{version}/model.joblib"
+        ckpt = f"models/{model_name(problem.key)}/{user_id}/{version}/model.joblib"
         st.put_bytes(ckpt, buf.getvalue())
         m = Model(name=model_name(problem.key), version=version, task=model_task(problem.key),
                   checkpoint_uri=ckpt, trained_on_dataset_id=ds.id,
                   eval_metrics=jsonsafe({**res.eval, "features": names, "pipeline_version": PIPELINE_VERSION,
                                          "compared_to": compared, "auto_promoted": promote}),
-                  status=ModelStatus.experimental,
+                  status=ModelStatus.experimental, user_id=user_id,
                   notes=f"{problem.title}: {problem.description}")
         db.add(m)
         db.flush()
         if promote:
-            for other in db.scalars(select(Model).where(Model.task == m.task, Model.status == ModelStatus.active)):
+            for other in db.scalars(select(Model).where(Model.task == m.task, Model.user_id == user_id,
+                                                        Model.status == ModelStatus.active)):
                 other.status = ModelStatus.deprecated
             m.status = ModelStatus.active
         db.commit()
@@ -240,21 +263,23 @@ def _model_summary(m: Model | None) -> dict | None:
     }
 
 
-def summary(db: Session) -> dict:
+def summary(db: Session, user_id: uuid.UUID) -> dict:
     cfg = CVSettings()
-    table = load_table(db)
+    table = load_table(db, user_id)
     problems = []
     for p in PROBLEMS.values():
         _, y = _labels(table, p)
         problems.append({"key": p.key, "title": p.title, "description": p.description,
-                         **eligibility(y, cfg), "model": _model_summary(active_outcome_model(db, p.key))})
-    job = db.scalar(select(Job).where(Job.type == jobs.JOB_TRAIN_OUTCOMES).order_by(Job.created_at.desc()).limit(1))
+                         **eligibility(y, cfg), "model": _model_summary(active_outcome_model(db, p.key, user_id))})
+    job = db.scalar(select(Job).where(Job.type == jobs.JOB_TRAIN_OUTCOMES,
+                                      Job.payload["user_id"].astext == str(user_id))
+                    .order_by(Job.created_at.desc()).limit(1))
     s = get_settings()
     return {
         "problems": problems,
         "tagged": len(table.outcomes),
         "with_metrics": len(table.swing_ids),
-        "changes_since_training": changes_since_training(db),
+        "changes_since_training": changes_since_training(db, user_id),
         "retrain_every": s.outcome_retrain_every,
         "training": None if job is None else {"status": job.status.value, "stage": job.stage,
                                               "error": job.error, "updated_at": job.updated_at.isoformat()},
@@ -277,12 +302,12 @@ def _impact_ref(db: Session, swing_id: uuid.UUID, prob: float | None, outcome: d
     }
 
 
-def analysis(db: Session, problem_key: str) -> dict:
+def analysis(db: Session, problem_key: str, user_id: uuid.UUID) -> dict:
     problem = PROBLEMS[problem_key]
     cfg = CVSettings()
-    table = load_table(db)
+    table = load_table(db, user_id)
     ids, y = _labels(table, problem)
-    m = active_outcome_model(db, problem_key)
+    m = active_outcome_model(db, problem_key, user_id)
     out = {"problem": {"key": problem.key, "title": problem.title, "description": problem.description},
            **eligibility(y, cfg), "model": _model_summary(m), "factors": [], "references": None, "latest": None}
     if m is None or not m.checkpoint_uri:
@@ -328,13 +353,13 @@ def analysis(db: Session, problem_key: str) -> dict:
     return out
 
 
-def predictions(db: Session, swing_id: uuid.UUID) -> list[dict]:
-    table = load_table(db)
+def predictions(db: Session, swing_id: uuid.UUID, user_id: uuid.UUID) -> list[dict]:
+    table = load_table(db, user_id)
     if swing_id not in table.values:
         return []
     out = []
     for p in PROBLEMS.values():
-        m = active_outcome_model(db, p.key)
+        m = active_outcome_model(db, p.key, user_id)
         if m is None or not m.checkpoint_uri:
             continue
         ck = load_checkpoint(m.checkpoint_uri)
@@ -347,9 +372,9 @@ def predictions(db: Session, swing_id: uuid.UUID) -> list[dict]:
     return out
 
 
-def explain_payload(db: Session, problem_key: str) -> dict:
+def explain_payload(db: Session, problem_key: str, user_id: uuid.UUID) -> dict:
     """Exactly what the optional LLM explanation sees: model output, no video or raw data."""
-    a = analysis(db, problem_key)
+    a = analysis(db, problem_key, user_id)
     return {
         "problem": a["problem"], "n": a["n"], "n_pos": a["n_pos"], "n_neg": a["n_neg"],
         "model": a["model"],

@@ -74,17 +74,20 @@ def test_minimums_gate_training():
 # --- End to end: tag -> automatic training -> promotion -> analysis ----------------------------
 
 
-def _make_swings(n, seed=0):
+def _make_swings(n, seed=0, username="owner"):
     """Swings with metrics but no video processing; 'shoulders_open@impact' drives slicing."""
     from datetime import datetime, timezone
 
+    from sqlalchemy import select
+
     from app.db import get_sessionmaker
-    from app.models import Metric, RecordingSession, Swing, Video, VideoStatus
+    from app.models import Metric, RecordingSession, Swing, User, Video, VideoStatus
 
     rng = np.random.default_rng(seed)
     out = []
     with get_sessionmaker()() as db:
-        sess = RecordingSession(recorded_at=datetime.now(timezone.utc))
+        uid = db.scalar(select(User.id).where(User.username == username))
+        sess = RecordingSession(recorded_at=datetime.now(timezone.utc), user_id=uid)
         db.add(sess)
         db.flush()
         for i in range(n):

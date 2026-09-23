@@ -44,15 +44,15 @@ def run_job(job_id: uuid.UUID, type_: str, payload: dict) -> None:
             redetect_events(db, uuid.UUID(payload["swing_id"]))
         elif type_ == jobs.JOB_RECOMPUTE_METRICS:
             recompute_all_metrics(db, on_stage=on_stage)
-            from app.outcomes.service import maybe_queue_training
+            from app.outcomes.service import queue_training_all
 
-            maybe_queue_training(db, force=True)  # features changed: retrain outcome models
+            queue_training_all(db)  # features changed: retrain outcome models
         elif type_ == jobs.JOB_TRACK_CLUB:
             track_club(db, uuid.UUID(payload["swing_id"]), on_stage=on_stage)
-            from app.outcomes.service import maybe_queue_training
+            from app.outcomes.service import queue_training_all
 
             if payload.get("retrain_after"):
-                maybe_queue_training(db, force=True)
+                queue_training_all(db)
         elif type_ == jobs.JOB_TRAIN_OUTCOMES:
             from app.outcomes.service import run_outcome_training
 
