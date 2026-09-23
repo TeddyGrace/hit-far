@@ -6,22 +6,27 @@ per swing. Outcome models learn which measured positions predict bad shots. Trai
 and promotion run automatically. The LLM is optional and only rephrases model output.
 The golfer's main miss is a **hook / duck-hook**, and they suspect lead-wrist twisting.
 
-## Pending builds (do these next, in order)
+## Club tracking plan (agreed with the user)
 
-1. **Club/shaft tracking.** The user asked for this to be kept as the immediate next build. It
-   replaces the proxy for the clubface closing. Detect the shaft, and later the clubhead, in every
-   proxy frame:
-   - Bootstrap from a small set of hand-labelled frames, then grow the labels through the existing
-     correction loop (`labels` rows).
-   - Store the output as `club_tracks` rows plus artifacts. The table already exists in
-     `backend/app/models.py`.
-   - New metrics: wrist hinge and lag (the angle from lead forearm to shaft), shaft lean at impact,
-     and shaft rotation or closing rate through impact. The rotation metric should supersede the
-     hand-point `lead_forearm_roll` and `forearm_roll_speed`.
-   - Feed the new metrics into the outcome models, especially the hook problem. Compare them with
-     the hand-point wrist metrics on the Analysis page.
-   - Shaft-parallel events (toe-up, mid-downswing) then stop relying on arm proxies.
-2. After that, see the Roadmap in `README.md`.
+- **Stage 1: in progress / built in this session.** A label-free shaft-line tracker in
+  `backend/app/pipeline/club.py`:
+  - The shaft is found as the strongest thin straight ridge leaving the hands; the pose model
+    provides the grip point.
+  - Tracking is smoothed over time with dynamic programming and gives a confidence per frame.
+  - Output: `club_tracks` rows plus an `.npz` artifact.
+  - The user corrects the shaft on the swing page, stored as `labels` rows with `task=club`.
+  - Club metrics are 2D and emitted only on confidently tracked frames: shaft lean, past-parallel,
+    wrist hinge, lag, release speed.
+  - Existing swings are tracked automatically by `track_club` jobs queued at API start-up.
+- **Stage 2: pending. Do next, once the user has uploaded a few range sessions.** Train a learned
+  shaft/clubhead detector (keypoints: grip end and clubhead) from the stage-1 tracker's
+  high-confidence frames (pseudo-labels) plus the user's `task=club` corrections. Register it in
+  `models` and auto-promote it when it beats the line tracker on held-out corrected frames.
+- **Stage 3: pending.** Clubhead and face orientation. A shaft *line* seen face-on cannot show the
+  face rotating about the shaft axis, and that rotation is the true signal for the golfer's
+  hook/duck-hook. It needs clubhead detection, ideally from a down-the-line camera or at a high
+  frame rate. Until then, the hook model relies on release speed, shaft lean and hand-point
+  forearm roll as proxies.
 
 ## Conventions
 - The default branch is `main`, and Railway auto-deploys from it (project "beautiful-cooperation":
