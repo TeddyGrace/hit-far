@@ -6,6 +6,24 @@ const pct = (r?: EvalResult) => (r && r.pce != null ? `${(r.pce * 100).toFixed(1
 function EvalSummary({ m }: { m: ModelInfo }) {
   const em = m.eval_metrics as Record<string, EvalResult & number> | null;
   if (!em) return <span className="muted">—</span>;
+  if (m.task.startsWith("outcome_")) {
+    const o = m.eval_metrics as { cv_auc?: number; cv_auc_ci?: [number, number]; reliable?: boolean; n?: number;
+      kind_title?: string; auto_promoted?: boolean; compared_to?: { version: string; cv_auc_same_data: number } | null };
+    return (
+      <div className="small">
+        <div>
+          CV AUC <strong>{o.cv_auc?.toFixed(2)}</strong> (CI {o.cv_auc_ci?.[0]?.toFixed(2)}–{o.cv_auc_ci?.[1]?.toFixed(2)})
+          on {o.n} swings · {o.reliable ? "reliable" : "not reliable yet"}
+        </div>
+        <div className="muted">
+          {o.kind_title}
+          {o.compared_to &&
+            ` · previous recipe scored ${o.compared_to.cv_auc_same_data?.toFixed(2)} on the same swings` +
+              (o.auto_promoted ? " → promoted" : " → kept previous")}
+        </div>
+      </div>
+    );
+  }
   if (!("golfdb_test" in em)) return <span className="muted small">{JSON.stringify(em)}</span>;
   const test = em.golfdb_test as EvalResult;
   const face = em.golfdb_test_face_on as EvalResult;
@@ -82,10 +100,11 @@ export default function Models() {
       <section className="card">
         <h2>Event model training</h2>
         <p className="small muted">
-          Trains a BiLSTM on GolfDB's 1,400 labelled swings plus your swings marked "events reviewed" (
-          {reviewed ?? "…"} so far). Runs on the <code>hit-far-trainer</code> service; the first run downloads GolfDB
-          and extracts pose for every clip (cached afterwards), so expect it to take a while. The new model is
-          registered as experimental. Promote it only if it beats the rules on held-out swings.
+          Trains a BiLSTM on GolfDB's 1,400 labelled swings plus any swings you marked "events reviewed" (
+          {reviewed ?? "…"} so far; optional). Runs on the <code>hit-far-trainer</code> service; the first run is
+          queued automatically on deploy, downloads GolfDB and extracts pose for every clip (cached afterwards), so
+          expect it to take a while. A new model goes live automatically when it beats the rules (and the current
+          model) on held-out swings, and every swing is re-detected with it.
         </p>
         <div className="controls">
           <button

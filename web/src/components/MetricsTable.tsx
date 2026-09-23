@@ -1,6 +1,6 @@
 import { EVENT_LABELS, EVENT_TYPES, EventType, Metric } from "../api";
 
-const NAMES: Record<string, string> = {
+export const NAMES: Record<string, string> = {
   tempo_ratio: "Tempo (backswing : downswing)",
   backswing_time: "Backswing time",
   downswing_time: "Downswing time",
@@ -16,18 +16,37 @@ const NAMES: Record<string, string> = {
   lead_elbow_angle: "Lead elbow angle (180 = straight)",
   lead_knee_flex: "Lead knee flex",
   trail_knee_flex: "Trail knee flex",
+  transition_time: "Transition time (top → mid-downswing)",
+  shoulders_open: "Shoulders open (vs address; − = closed)",
+  hips_open: "Hips open (vs address; − = closed)",
+  sequencing_hip_lead: "Hips lead shoulders (peak rotation speed)",
+  pelvis_toward_lead_foot: "Pelvis over stance (0 trail – 100 lead ankle)",
+  hands_ahead: "Hands ahead of address position",
 };
 
-const ESTIMATE_NOTE =
+/** "shoulders_open@impact" -> "Shoulders open (…) at Impact". */
+export function featureLabel(feature: string, short = false): string {
+  const [metric, event] = feature.split("@");
+  let name = NAMES[metric] ?? metric.replace(/_/g, " ");
+  if (short) name = name.replace(/\s*\(.*\)$/, "");
+  return event ? `${name} at ${EVENT_LABELS[event as EventType] ?? event}` : name;
+}
+
+export function fmtValue(value: number, unit: string): string {
+  if (unit === "ratio") return `${value.toFixed(2)} : 1`;
+  if (unit === "s") return `${value.toFixed(2)} s`;
+  if (unit === "ms") return `${value.toFixed(0)} ms`;
+  if (unit === "deg") return `${value.toFixed(1)}°`;
+  if (unit.startsWith("%")) return `${value.toFixed(0)} ${unit}`;
+  return `${value.toFixed(2)} ${unit}`;
+}
+
+export const ESTIMATE_NOTE =
   "Monocular 3D estimate (MediaPipe world landmarks). Depth is inferred, not measured; " +
   "no error bound until a dual-camera calibration session exists.";
 
 function fmt(m: Metric): string {
-  if (m.unit === "ratio") return `${m.value.toFixed(2)} : 1`;
-  if (m.unit === "s") return `${m.value.toFixed(2)} s`;
-  if (m.unit === "deg") return `${m.value.toFixed(1)}°`;
-  if (m.unit.startsWith("%")) return `${m.value.toFixed(0)} ${m.unit}`;
-  return `${m.value.toFixed(2)} ${m.unit}`;
+  return fmtValue(m.value, m.unit);
 }
 
 export default function MetricsTable({ metrics, onJump, eventFrames }: {

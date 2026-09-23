@@ -109,21 +109,45 @@ The whole project is **one Docker image, run as two services**: the API, which a
    If you get signature or host errors, set `S3_ADDRESSING_STYLE=path`.
 4. **Browser uploads go straight to the bucket** through presigned URLs, so the bucket needs CORS for your origin. The API sets it at startup whenever `PUBLIC_ORIGIN` is set. Check the API logs for `bucket CORS set for …`.
 
+## Outcome models: what in your swing predicts your slice?
+
+This is the part that replaces the instructor. You tag each shot's outcome with one tap, and small models trained only on your swings learn which of your measured positions go with your bad shots. No LLM is involved in the finding.
+
+- **Tagging:** outcome chips sit next to every video on the session page and on the swing page: shape (slice / fade / straight / draw / hook, relative to you, so it means the same thing for left-handers), start line, and contact (fat / solid / thin). Tap again to clear. Each change is stored in `shot_outcomes` and appended to `labels` (`task=outcome`). Launch-monitor numbers (club path, face-to-path, etc.) can be stored too; they are not used as model features, because they would give the answer away.
+- **Problems:** slice (slice or fade vs. straight, draw or hook), hook, fat and thin, each a separate binary model.
+- **Features:** every metric at every event, one row per swing (`backend/app/outcomes/features.py`). Pipeline v0.2.0 adds the slice- and contact-relevant set: shoulders and hips open (signed, relative to address and oriented by your own backswing) at mid-downswing and impact, hip-before-shoulder sequencing, pelvis position in the stance, hands ahead at impact, and transition time.
+- **Training (`outcomes/train.py`):**
+  - Candidates are an L2 logistic regression and very shallow gradient-boosted trees. The trees win only if they beat the regression by 0.03 AUC.
+  - Scored by repeated stratified cross-validation (5-fold × 10), with a bootstrap 95% CI on AUC.
+- **Honesty gates:**
+  - No training until a problem has at least 20 tagged swings and 6 of each class. The Analysis page shows how many more you need.
+  - A model counts as reliable only when the lower bound of its AUC CI is above 0.60 *and* it beats the 95th percentile of the same procedure run on shuffled labels. Otherwise the page says there is no reliable pattern yet.
+  - A factor is reported only when the model relies on it (permutation importance across CV folds, more than 2 standard errors) *and* it separates your good and bad shots on its own (Mann-Whitney test, Bonferroni-corrected for the number of metrics).
+- **Explanations:** for each factor, your good-shot and bad-shot medians plus a strip chart of every swing, with your latest session marked. There is also a what-if for your latest swing (move one metric to your good-shot median and see how the predicted probability changes), and your best good swing next to a typical bad one, both paused at impact.
+- **Automation:**
+  - Every 5 outcome changes (`OUTCOME_RETRAIN_EVERY`), the worker retrains every eligible problem, which takes seconds.
+  - A new version goes live only if it scores at least as well as the active model's recipe re-scored on the same swings. The comparison is recorded in `eval_metrics.compared_to`.
+  - After a metric formula change, API start-up queues a `recompute_metrics` job, then a retrain.
+  - Checkpoints go to `models/outcome-<problem>/<version>/model.joblib`, and a `datasets` row stores the swing IDs and the feature snapshot.
+- **Optional words:** with `OUTCOME_LLM_EXPLAIN=true`, an "Explain in words" button sends only the model's numbers to Claude to rephrase them. It is off by default.
+- **Limits:** the models see your body, not the club face or path, and the findings are correlations in your own data. The suggested fix is to move toward your own good-shot range, which you can test: tag the next sessions and watch the predictions and outcomes.
+
 ## Training the event model
 
-**Models → Train event model** trains a learned swing-event detector to replace the rule-based one.
+The first training run is queued automatically when the API starts, if no trained event model exists yet (`AUTO_START_JOBS`). **Models → Train event model** starts another run. It trains a learned swing-event detector to replace the rule-based one.
 
 - **Where it runs:** on the `hit-far-trainer` Railway service, which handles only training jobs so a run never blocks swing processing.
 - **Data:** GolfDB's 1,400 labeled swings (CC BY-NC 4.0, fine for personal use). The labels come from the GolfDB GitHub repo. The 160×160 clips come from the authors' Google Drive link, with `GOLFDB_VIDEOS_URL` as an override.
   - If Drive refuses the download (it rate-limits popular files), put `videos_160.zip` in the bucket at `datasets/golfdb/videos_160.zip` yourself and retry.
-- **Your swings:** swings you've marked **"All 8 events checked"** on the swing page are included and weighted up. Every 5th one is held out for scoring.
+- **Your swings (optional):** swings you've marked **"All 8 events checked"** on the swing page are included and weighted up. Every 5th one is held out for scoring.
 - **Pose:** MediaPipe runs on every GolfDB clip in parallel across all CPU cores, with each clip's result cached in the bucket (`datasets/golfdb/pose/`). The first run takes a while on CPU; later runs skip it.
 - **Model:** a bidirectional LSTM that classifies each frame (8 events plus background) from normalized pose features: hip-centered, torso-scaled joints, their velocities and visibility.
   - Training variation: random time-scaling (to cover any frame rate), mirroring (left-handers), padding with idle frames, and noise.
   - At inference it tries several time scales and keeps the most confident one, so 240 fps slow-motion and 30 fps both work. The 8 events are decoded in order with dynamic programming.
 - **Evaluation:** PCE on GolfDB's held-out split 1, using GolfDB's own tolerance (`max(1, round((impact - address) / 30))` frames). It's reported overall and for face-on, next to the rule-based detector on the same swings, plus your held-out swings.
-- **Registry:** the checkpoint goes to `models/event-bilstm/<version>/model.pt`, and the model is registered as `experimental`, linked to a `datasets` row with its manifest.
-- **Promote** makes a model the active event detector. The previous one is kept (deprecated) and can be promoted back. **Re-run events on all swings** applies the active model to existing swings; your corrections still override it.
+- **Registry:** the checkpoint goes to `models/event-bilstm/<version>/model.pt`, linked to a `datasets` row with its manifest.
+- **Auto-promotion:** a new model goes live automatically when it beats the rules on GolfDB's held-out face-on swings (and on your held-out swings, if you have any) and is at least as good as the trained model currently active. Every swing is then re-detected with it. Otherwise it stays `experimental`.
+- **Promote** makes a model the active event detector by hand. The previous one is kept (deprecated) and can be promoted back. **Re-run events on all swings** applies the active model to existing swings; your corrections still override it.
 - **Safety:** if a trained model fails to load or run, the pipeline falls back to the rule-based detector rather than failing the swing.
 
 Local development needs PyTorch: `pip install torch --index-url https://download.pytorch.org/whl/cpu`.
@@ -155,19 +179,22 @@ backend/app/
   pipeline/events.py     rule-based event detector
   pipeline/metrics.py    deterministic metrics (PIPELINE_VERSION)
   pipeline/run.py        orchestration + effective events (predictions overridden by labels)
+  outcomes/              outcome models: problems, features, train (CV, gates, factors), service, explain
+  automation.py          start-up jobs (metric recompute, first event-model training)
   worker.py, jobs.py     Postgres-backed queue
   routers/               sessions, videos, swings (detail, pose frames, event corrections), models
 web/src/
-  pages/SwingView.tsx    viewer: video + skeleton, timeline, events, metrics
+  pages/SwingView.tsx    viewer: video + skeleton, timeline, events, outcome, predictions, metrics
+  pages/Analysis.tsx     outcome models: data status, reliability, factors, what-if, reference swings
 ```
 
 ## Roadmap
 
 These tables are already in the schema; the code for them is still to come.
 
-1. **Trained event model:** the training pipeline is in place (see above). Next, run it on GolfDB, promote it if it beats the rules, and retrain as your reviewed swings accumulate.
+1. **Trained event model:** the first GolfDB run is queued automatically on deploy and promotes itself if it beats the rules.
 2. **Pose fine-tuning.** Fine-tune the keypoint model with a Label Studio round-trip for occluded and blurred frames (the top of the backswing, impact).
 3. **Club/shaft detector.** Bootstrap it from hand labels and grow it through the correction loop. Shaft-parallel events then stop using arm proxies.
 4. **Dual-camera calibration sessions.** Sync two cameras by clap or flash, then triangulate. Use the triangulated poses to fine-tune the monocular lifter and to fill `pose_3d_sequences.error_estimate`.
 5. **Reference profiles and comparison.** Compare against archetypes or your own reference swings, with DTW event alignment and per-metric deltas.
-6. **Trained fault classifier.** Once enough confirmed verdicts accumulate, train gradient-boosted trees on metrics → confirmed faults to replace the seed rules, then evaluate them against held-out verdicts (and instructor labels).
+6. **Outcome models, next steps:** use launch-monitor face and path numbers as targets when present, and add club and face features once club tracking exists.

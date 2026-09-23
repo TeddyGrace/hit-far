@@ -65,9 +65,42 @@ class VideoOut(ORM):
     duration_s: float | None
 
 
+Shape = Literal["slice", "fade", "straight", "draw", "hook"]
+StartLine = Literal["left", "straight", "right"]
+Contact = Literal["fat", "solid", "thin"]
+
+
+class ShotOutcomeIn(BaseModel):
+    """Fields left out are unchanged; null clears one. Clearing everything removes the tag."""
+
+    shape: Shape | None = None
+    start_line: StartLine | None = None
+    contact: Contact | None = None
+    source: Literal["self", "launch_monitor"] | None = None
+    club_path: float | None = None
+    face_to_path: float | None = None
+    face_angle: float | None = None
+    carry: float | None = None
+    offline: float | None = None
+
+
+class ShotOutcomeOut(ORM):
+    shape: str | None
+    start_line: str | None
+    contact: str | None
+    source: str
+    club_path: float | None
+    face_to_path: float | None
+    face_angle: float | None
+    carry: float | None
+    offline: float | None
+    updated_at: datetime
+
+
 class VideoWithStatus(VideoOut):
     job: JobOut | None = None
     swing_id: uuid.UUID | None = None
+    outcome: ShotOutcomeOut | None = None
 
 
 class SessionDetail(SessionOut):
@@ -151,6 +184,7 @@ class SwingDetail(BaseModel):
     pose: PoseInfo | None
     events: list[EventOut]
     events_reviewed: bool
+    outcome: ShotOutcomeOut | None
     metrics: list[MetricOut]
     pipeline_version: str
 

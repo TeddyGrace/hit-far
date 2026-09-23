@@ -51,9 +51,30 @@ export interface Video {
   num_frames: number | null;
   duration_s: number | null;
 }
+export const SHAPES = ["slice", "fade", "straight", "draw", "hook"] as const;
+export const START_LINES = ["left", "straight", "right"] as const;
+export const CONTACTS = ["fat", "solid", "thin"] as const;
+export type Shape = (typeof SHAPES)[number];
+export type StartLine = (typeof START_LINES)[number];
+export type Contact = (typeof CONTACTS)[number];
+export interface ShotOutcome {
+  shape: Shape | null;
+  start_line: StartLine | null;
+  contact: Contact | null;
+  source: "self" | "launch_monitor";
+  club_path: number | null;
+  face_to_path: number | null;
+  face_angle: number | null;
+  carry: number | null;
+  offline: number | null;
+  updated_at: string;
+}
+export type OutcomePatch = Partial<Omit<ShotOutcome, "updated_at">>;
+
 export interface VideoWithStatus extends Video {
   job: Job | null;
   swing_id: string | null;
+  outcome: ShotOutcome | null;
 }
 export interface SessionDetail extends Session {
   videos: VideoWithStatus[];
@@ -97,6 +118,7 @@ export interface SwingDetail {
   pose: { model: ModelRef; num_frames: number; mean_confidence: number | null; landmark_schema_version: string } | null;
   events: SwingEvent[];
   events_reviewed: boolean;
+  outcome: ShotOutcome | null;
   metrics: Metric[];
   pipeline_version: string;
 }
@@ -165,6 +187,108 @@ export interface EvalResult {
   n: number;
   pce?: number;
   per_event?: Record<string, number>;
+}
+
+// --- Outcome models ---
+
+export type ProblemKey = "slice" | "hook" | "fat" | "thin";
+export interface Need {
+  swings: number;
+  positive: number;
+  negative: number;
+}
+export interface OutcomeModel {
+  id: string;
+  version: string;
+  created_at: string;
+  kind: string;
+  kind_title: string;
+  n: number;
+  cv_auc: number | null;
+  cv_auc_ci: [number | null, number | null];
+  null_auc_95: number | null;
+  reliable: boolean;
+  reliable_rule: string;
+  candidates: Record<string, { cv_auc: number | null; cv_auc_ci: [number | null, number | null] }>;
+  protocol: string;
+  pipeline_version: string;
+}
+export interface ProblemStatus {
+  key: ProblemKey;
+  title: string;
+  description: string;
+  n: number;
+  n_pos: number;
+  n_neg: number;
+  eligible: boolean;
+  need: Need;
+  model: OutcomeModel | null;
+}
+export interface OutcomesSummary {
+  problems: ProblemStatus[];
+  tagged: number;
+  with_metrics: number;
+  changes_since_training: number;
+  retrain_every: number;
+  training: { status: JobStatus; stage: string | null; error: string | null; updated_at: string } | null;
+  llm_enabled: boolean;
+  pipeline_version: string;
+}
+export interface Factor {
+  feature: string;
+  metric?: string;
+  event?: string | null;
+  unit?: string;
+  is_estimate?: boolean;
+  importance: number;
+  importance_se: number;
+  univariate_auc: number | null;
+  univariate_ci: [number | null, number | null];
+  direction: "higher" | "lower";
+  good_median: number | null;
+  bad_median: number | null;
+  n: number;
+  supported: boolean;
+  points?: { swing_id: string; value: number; bad: boolean }[];
+  latest_median?: number | null;
+}
+export interface WhatIf {
+  feature: string;
+  value: number;
+  target: number;
+  probability: number;
+  probability_if: number;
+  delta: number;
+}
+export interface ImpactRef {
+  swing_id: string;
+  filename: string | null;
+  playback_url: string | null;
+  fps: number | null;
+  impact_frame: number | null;
+  probability: number | null;
+  outcome: ShotOutcome | null;
+}
+export interface OutcomeAnalysis {
+  problem: { key: ProblemKey; title: string; description: string };
+  n: number;
+  n_pos: number;
+  n_neg: number;
+  eligible: boolean;
+  need: Need;
+  model: OutcomeModel | null;
+  factors: Factor[];
+  references: { good: ImpactRef | null; bad: ImpactRef | null } | null;
+  latest: { session_id: string | null; n: number } | null;
+  what_if?: { swing_id: string; items: WhatIf[] };
+}
+export interface Prediction {
+  problem: ProblemKey;
+  title: string;
+  probability: number;
+  reliable: boolean;
+  model_version: string;
+  what_if: WhatIf[];
 }
 
 export class ApiError extends Error {
@@ -236,6 +360,15 @@ export const api = {
   redetectAll: () => request<{ queued: number }>("POST", "/api/swings/redetect-events"),
   setReviewed: (swingId: string, reviewed: boolean) =>
     request<SwingDetail>("PUT", `/api/swings/${swingId}/review`, { reviewed }),
+
+  setOutcome: (swingId: string, patch: OutcomePatch) =>
+    request<ShotOutcome | null>("PUT", `/api/swings/${swingId}/outcome`, patch),
+  swingPredictions: (swingId: string) => request<Prediction[]>("GET", `/api/swings/${swingId}/predictions`),
+  outcomesSummary: () => request<OutcomesSummary>("GET", "/api/outcomes"),
+  outcomeAnalysis: (problem: ProblemKey) => request<OutcomeAnalysis>("GET", `/api/outcomes/${problem}`),
+  trainOutcomes: () => request<{ queued: boolean }>("POST", "/api/outcomes/train"),
+  explainOutcome: (problem: ProblemKey) =>
+    request<{ explanation: string; served_model: string }>("POST", `/api/outcomes/${problem}/explain`),
 
   listFaults: () => request<FaultInfo[]>("GET", "/api/faults"),
   listDiagnoses: (swingId: string) => request<Diagnosis[]>("GET", `/api/swings/${swingId}/diagnoses`),

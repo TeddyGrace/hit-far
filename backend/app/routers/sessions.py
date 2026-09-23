@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app import jobs
 from app.auth import require_auth
 from app.db import get_db
-from app.models import PoseSequence, RecordingSession, Swing, Video
+from app.models import PoseSequence, RecordingSession, ShotOutcome, Swing, Video
 from app.schemas import (
     JobOut,
     SessionDetail,
@@ -59,6 +59,8 @@ def get_session(session_id: uuid.UUID, db: Session = Depends(get_db)):
     s = get_session_or_404(db, session_id)
     swings = db.scalars(select(Swing).where(Swing.session_id == s.id)).all()
     swing_by_video = {vid: sw.id for sw in swings for vid in sw.video_ids}
+    outcomes = {o.swing_id: o for o in db.scalars(
+        select(ShotOutcome).where(ShotOutcome.swing_id.in_([sw.id for sw in swings]))).all()} if swings else {}
     videos = []
     for v in s.videos:
         job = jobs.latest_for(db, v.id)
@@ -66,6 +68,7 @@ def get_session(session_id: uuid.UUID, db: Session = Depends(get_db)):
             **VideoOut.model_validate(v).model_dump(),
             job=JobOut.model_validate(job) if job else None,
             swing_id=swing_by_video.get(v.id),
+            outcome=outcomes.get(swing_by_video.get(v.id)),
         ))
     return SessionDetail(**SessionOut.model_validate(s).model_dump(), videos=videos)
 

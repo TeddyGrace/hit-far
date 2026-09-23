@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, EVENT_LABELS, EVENT_TYPES, EventType, PoseFrames, SwingDetail } from "../api";
+import { api, EVENT_LABELS, EVENT_TYPES, EventType, PoseFrames, Prediction, SwingDetail } from "../api";
 import DiagnosisPanel from "../components/DiagnosisPanel";
 import EventTimeline, { REVIEW_THRESHOLD } from "../components/EventTimeline";
 import MetricsTable from "../components/MetricsTable";
+import OutcomeChips from "../components/OutcomeChips";
 import VideoOverlay from "../components/VideoOverlay";
+import { WhatIfList } from "./Analysis";
 
 const RATES = [1, 0.5, 0.25, 0.1];
 
@@ -12,6 +14,7 @@ export default function SwingView() {
   const { id } = useParams<{ id: string }>();
   const [swing, setSwing] = useState<SwingDetail | null>(null);
   const [pose, setPose] = useState<PoseFrames | null>(null);
+  const [predictions, setPredictions] = useState<Prediction[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [frame, setFrame] = useState(0);
   const [rate, setRate] = useState(0.25);
@@ -26,6 +29,7 @@ export default function SwingView() {
     if (!id) return;
     api.getSwing(id).then(setSwing, (e) => setError(e.message));
     api.getPose(id).then(setPose, () => setPose(null));
+    api.swingPredictions(id).then(setPredictions, () => setPredictions(null));
   }, [id]);
 
   useEffect(() => {
@@ -196,17 +200,43 @@ export default function SwingView() {
 
         <aside className="side">
           <section>
+            <h2>Shot outcome</h2>
+            <OutcomeChips key={swing.id} swingId={swing.id} outcome={swing.outcome} full />
+          </section>
+
+          {predictions && predictions.length > 0 && (
+            <section>
+              <h2>
+                Outcome models <Link className="small" to="/analysis">analysis →</Link>
+              </h2>
+              {predictions.map((p) => (
+                <div key={p.problem} className="prediction">
+                  <div className="prediction-head">
+                    <span>{p.title}</span>
+                    <div className="likelihood" title={`${Math.round(p.probability * 100)}%`}>
+                      <div style={{ width: `${p.probability * 100}%` }} />
+                    </div>
+                    <span className="num small">{Math.round(p.probability * 100)}%</span>
+                    {!p.reliable && <span className="chip busy" title="Cross-validated AUC hasn't passed the reliability gate">not reliable yet</span>}
+                  </div>
+                  {p.reliable && p.what_if.length > 0 && <WhatIfList items={p.what_if} title={p.title} />}
+                </div>
+              ))}
+            </section>
+          )}
+
+          <section>
             <h2>
               Events {saving && <span className="muted small">saving…</span>}
               {toReview > 0 && !swing.events_reviewed && <span className="chip busy">{toReview} to review</span>}
             </h2>
-            <label className="inline small" title="Reviewed swings become training data for the event model">
+            <label className="inline small" title="Optional. Reviewed swings are added to the event model's training data">
               <input
                 type="checkbox"
                 checked={swing.events_reviewed}
                 onChange={async (e) => setSwing(await api.setReviewed(swing.id, e.target.checked))}
               />
-              All 8 events checked (use as training data)
+              All 8 events checked (optional: adds to training data)
             </label>
             <table className="table events">
               <tbody>

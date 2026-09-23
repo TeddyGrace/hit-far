@@ -13,4 +13,6 @@ imageio-ffmpeg>=0.6,<1
 anthropic>=1.8,<2
 pandas>=2.2,<4
 gdown>=5.2,<7
+scikit-learn>=1.9,<1.10
+joblib>=1.5,<2
 # torch (CPU build) is installed separately - see Dockerfile / README.

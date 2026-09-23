@@ -247,6 +247,24 @@ def recompute_metrics(db: Session, swing: Swing, pose: PoseData | None = None) -
     return rows
 
 
+def swings_needing_metrics(db: Session) -> list[uuid.UUID]:
+    """Swings with pose but no metrics at the current PIPELINE_VERSION (e.g. after a formula bump)."""
+    has_pose = select(PoseSequence.swing_id).distinct()
+    current = select(Metric.swing_id).where(Metric.pipeline_version == PIPELINE_VERSION).distinct()
+    return list(db.scalars(select(Swing.id).where(Swing.id.in_(has_pose), Swing.id.not_in(current))).all())
+
+
+def recompute_all_metrics(db: Session, on_stage: Callable[[str], None] = lambda s: None) -> int:
+    """Recompute metrics for every swing with pose (pose is cached, so this is seconds per swing)."""
+    ids = list(db.scalars(select(PoseSequence.swing_id).distinct()).all())
+    for n, sid in enumerate(ids, 1):
+        swing = db.get(Swing, sid)
+        if swing is not None:
+            recompute_metrics(db, swing)
+        on_stage(f"metrics {n}/{len(ids)}")
+    return len(ids)
+
+
 # --- Entry point used by the worker ------------------------------------------------------------
 
 

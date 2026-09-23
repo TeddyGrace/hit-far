@@ -48,7 +48,7 @@ class DiagnosisOutput(BaseModel):
 
 @dataclass
 class ClaudeResult:
-    output: DiagnosisOutput
+    output: BaseModel  # DiagnosisOutput unless another output_model was requested
     model: str  # the model that actually served the request (may be a fallback)
     usage: dict
 
@@ -62,7 +62,8 @@ def is_configured() -> bool:
     return bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"))
 
 
-def call_claude(system: str, content: list[dict], schema: dict, client=None) -> ClaudeResult:
+def call_claude(system: str, content: list[dict], schema: dict, client=None,
+                output_model: type[BaseModel] = DiagnosisOutput) -> ClaudeResult:
     import anthropic
 
     if client is None and not is_configured():
@@ -101,7 +102,7 @@ def call_claude(system: str, content: list[dict], schema: dict, client=None) -> 
     if text is None:
         raise DiagnosisError("Claude returned no text output")
     try:
-        output = DiagnosisOutput.model_validate(json.loads(text))
+        output = output_model.model_validate(json.loads(text))
     except (json.JSONDecodeError, ValueError) as e:
         raise DiagnosisError(f"Claude returned malformed output: {e}") from e
     usage = response.usage.model_dump(exclude_none=True) if response.usage else {}

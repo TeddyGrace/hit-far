@@ -17,11 +17,12 @@ import numpy as np
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app import jobs
 from app.config import get_settings
 from app.models import EVENT_ORDER, Dataset, DatasetSource, Label, Model, ModelStatus, Swing
 from app.pipeline import events as rule_events
 from app.pipeline.registry import TASK_EVENTS
-from app.pipeline.run import effective_events, latest_pose_sequence, load_pose
+from app.pipeline.run import active_event_model, effective_events, latest_pose_sequence, load_pose
 from app.storage import get_storage
 from app.training import golfdb
 from app.training.features import FEATURE_VERSION, mirror, pose_features, resample, to_features
@@ -232,6 +233,38 @@ def train(samples: list[Sample], cfg: TrainConfig, progress: Callable[[str], Non
     return model, {"best_val_pce": round(best, 4), "best_epoch": best_epoch, "epochs_run": epoch}
 
 
+def _face_on_pce(em: dict | None, key: str = "golfdb_test_face_on") -> float | None:
+    r = (em or {}).get(key) or {}
+    return r.get("pce") if r.get("n") else None
+
+
+def auto_promote(db: Session, m: Model) -> bool:
+    """Hands-off promotion: the new model goes live if it beats the rule baseline on GolfDB's
+    held-out face-on swings (and on your held-out swings, when there are any) and is at least as
+    good as the trained model currently active. Then every swing is re-detected with it."""
+    em = m.eval_metrics or {}
+    mine, rules = _face_on_pce(em), _face_on_pce(em, "rules_golfdb_test_face_on")
+    if mine is None or rules is None or mine <= rules:
+        return False
+    self_m, self_r = _face_on_pce(em, "self_holdout"), _face_on_pce(em, "rules_self_holdout")
+    if self_m is not None and self_r is not None and self_m < self_r:
+        return False
+    current = active_event_model(db)
+    if current is not None and current.checkpoint_uri:
+        cur = _face_on_pce(current.eval_metrics)
+        if cur is not None and mine < cur:
+            return False
+    for other in db.scalars(select(Model).where(Model.task == TASK_EVENTS, Model.status == ModelStatus.active)):
+        other.status = ModelStatus.deprecated
+    m.status = ModelStatus.active
+    for swing in db.scalars(select(Swing)).all():
+        if latest_pose_sequence(db, swing.id) is not None:
+            jobs.enqueue(db, jobs.JOB_DETECT_EVENTS, {"swing_id": str(swing.id)}, subject_id=swing.id)
+    db.commit()
+    log.info("auto-promoted %s %s (face-on PCE %.3f vs rules %.3f)", m.name, m.version, mine, rules)
+    return True
+
+
 # --- Entry point (trainer job) -----------------------------------------------------------------
 
 
@@ -296,6 +329,10 @@ def run_training(db: Session, payload: dict, on_stage: Callable[[str], None] = l
               notes="BiLSTM over pose features; trained on GolfDB + reviewed swings")
     db.add(m)
     db.commit()
+    if auto_promote(db, m):
+        metrics["auto_promoted"] = True
+        m.eval_metrics = dict(metrics)
+        db.commit()
     on_stage("done")
     log.info("trained %s %s: %s", MODEL_NAME, version, json.dumps(metrics)[:500])
     return m

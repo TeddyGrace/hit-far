@@ -7,6 +7,7 @@ os.environ["STORAGE_BACKEND"] = "local"
 os.environ["LOCAL_STORAGE_DIR"] = tempfile.mkdtemp(prefix="hitfar-test-storage-")
 os.environ["APP_PASSWORD"] = "test-pw"
 os.environ["SECRET_KEY"] = "test-secret"
+os.environ["AUTO_START_JOBS"] = "false"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

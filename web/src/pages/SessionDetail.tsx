@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, CameraRole, SessionDetail as SessionDetailT, uploadFile, VideoWithStatus } from "../api";
+import OutcomeChips from "../components/OutcomeChips";
 
 interface PendingUpload {
   key: string;
@@ -117,6 +118,12 @@ export default function SessionDetail() {
         </div>
       ))}
 
+      {session.videos.length > 0 && (
+        <p className="muted small">
+          Tag each shot's outcome (tap again to clear). The outcome models on the Analysis page retrain automatically as
+          you tag.
+        </p>
+      )}
       {session.videos.length === 0 ? (
         <p className="muted">No videos yet.</p>
       ) : (
@@ -127,6 +134,7 @@ export default function SessionDetail() {
               <th>Camera</th>
               <th>Frames</th>
               <th>Status</th>
+              <th>Shot outcome</th>
               <th></th>
             </tr>
           </thead>
@@ -154,6 +162,9 @@ export default function SessionDetail() {
                 </td>
                 <td>
                   <StatusChip v={v} />
+                </td>
+                <td>
+                  {v.swing_id && <OutcomeChips swingId={v.swing_id} outcome={v.outcome} />}
                 </td>
                 <td className="actions">
                   <button className="link" onClick={() => act(() => api.reprocess(v.id))} disabled={!!busy}>

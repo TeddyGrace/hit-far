@@ -14,7 +14,7 @@ import uuid
 from app import jobs
 from app.config import get_settings
 from app.db import get_sessionmaker
-from app.pipeline.run import PermanentError, process_video, redetect_events
+from app.pipeline.run import PermanentError, process_video, recompute_all_metrics, redetect_events
 
 log = logging.getLogger("hitfar.worker")
 _stop = False
@@ -36,6 +36,15 @@ def run_job(job_id: uuid.UUID, type_: str, payload: dict) -> None:
             process_video(db, uuid.UUID(payload["video_id"]), force=payload.get("force", False), on_stage=on_stage)
         elif type_ == jobs.JOB_DETECT_EVENTS:
             redetect_events(db, uuid.UUID(payload["swing_id"]))
+        elif type_ == jobs.JOB_RECOMPUTE_METRICS:
+            recompute_all_metrics(db, on_stage=on_stage)
+            from app.outcomes.service import maybe_queue_training
+
+            maybe_queue_training(db, force=True)  # features changed: retrain outcome models
+        elif type_ == jobs.JOB_TRAIN_OUTCOMES:
+            from app.outcomes.service import run_outcome_training
+
+            run_outcome_training(db, payload, on_stage=on_stage)
         elif type_ == jobs.JOB_TRAIN_EVENTS:
             from app.training.train_events import run_training
 

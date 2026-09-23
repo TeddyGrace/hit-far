@@ -167,6 +167,35 @@ class Swing(Base):
     session: Mapped[RecordingSession] = relationship(back_populates="swings")
 
 
+class ShotOutcome(Base):
+    """What the ball did, tagged by the golfer (one tap) or copied from a launch monitor.
+
+    `shape` is relative to the golfer: "slice" curves away from a right-hander's body (right) and
+    away from a left-hander's (left), so the same word means the same fault for both.
+    Launch-monitor numbers are optional and stored in the monitor's own convention.
+    """
+
+    __tablename__ = "shot_outcomes"
+
+    id: Mapped[uuid.UUID] = _pk()
+    swing_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("swings.id", ondelete="CASCADE"), unique=True, nullable=False
+    )
+    shape: Mapped[str | None] = mapped_column(String(10))  # slice fade straight draw hook
+    start_line: Mapped[str | None] = mapped_column(String(10))  # left straight right
+    contact: Mapped[str | None] = mapped_column(String(10))  # fat solid thin
+    source: Mapped[str] = mapped_column(String(20), default="self", nullable=False)  # self | launch_monitor
+    club_path: Mapped[float | None] = mapped_column(Float)
+    face_to_path: Mapped[float | None] = mapped_column(Float)
+    face_angle: Mapped[float | None] = mapped_column(Float)
+    carry: Mapped[float | None] = mapped_column(Float)
+    offline: Mapped[float | None] = mapped_column(Float)
+    created_at: Mapped[datetime] = _created()
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
 # --- MLOps backbone ----------------------------------------------------------------------------
 
 

@@ -26,9 +26,11 @@ def _phi(t: float, a=ADDRESS_S, top=TOP_S, imp=IMPACT_S, fin=FINISH_S) -> float:
 
 
 def make_swing(target_dir: int = 1, turn_at_top_deg: float = 90.0, hip_turn_at_top_deg: float = 45.0,
-               times: tuple[float, float, float, float, float] | None = None, fps: float = FPS) -> PoseData:
+               times: tuple[float, float, float, float, float] | None = None, fps: float = FPS,
+               shoulders_open_deg: float = 0.0, hips_open_deg: float = 0.0) -> PoseData:
     """target_dir=+1 means the target is toward +x in the image (lead side on the right of the image).
-    times = (address, top, impact, finish, end) in seconds."""
+    times = (address, top, impact, finish, end) in seconds. *_open_deg = rotation past address
+    toward the target reached at impact (ramped in over the downswing)."""
     a_s, top_s, imp_s, fin_s, end_s = times or (ADDRESS_S, TOP_S, IMPACT_S, FINISH_S, END_S)
     phi_at = lambda t: _phi(t, a_s, top_s, imp_s, fin_s)  # noqa: E731
     T = int(end_s * fps)
@@ -57,9 +59,10 @@ def make_swing(target_dir: int = 1, turn_at_top_deg: float = 90.0, hip_turn_at_t
 
         # World: rotate shoulders/hips about vertical proportionally to backswing progress.
         prog = max(0.0, -phi_at(t)) / 170.0 if t <= imp_s else 0.0
-        for (li, ri, half, turn) in ((lead_sh, trail_sh, 0.2, turn_at_top_deg),
-                                     (L.L_HIP, L.R_HIP, 0.15, hip_turn_at_top_deg)):
-            a = np.radians(turn * prog)
+        down = 0.0 if t <= top_s else (1.0 if t >= imp_s else ((t - top_s) / (imp_s - top_s)) ** 2)
+        for (li, ri, half, turn, opened) in ((lead_sh, trail_sh, 0.2, turn_at_top_deg, shoulders_open_deg),
+                                             (L.L_HIP, L.R_HIP, 0.15, hip_turn_at_top_deg, hips_open_deg)):
+            a = np.radians(turn * prog - opened * down)
             v = np.array([np.cos(a), 0.0, np.sin(a)]) * half
             y = -0.5 if half == 0.2 else 0.0
             world[f, li] = [v[0], y, v[2]]

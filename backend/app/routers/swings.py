@@ -9,6 +9,7 @@ from app import jobs
 from app.auth import require_auth
 from app.db import get_db
 from app.models import EVENT_ORDER, EventType, Label, Metric, Model, Swing, Video
+from app.outcomes.service import get_outcome
 from app.pipeline.landmarks import CONNECTIONS
 from app.pipeline.metrics import PIPELINE_VERSION
 from app.pipeline.run import (
@@ -103,6 +104,7 @@ def swing_detail(db: Session, swing: Swing) -> SwingDetail:
         video=SwingVideo(**VideoOut.model_validate(video).model_dump(), playback_url=playback),
         job=JobOut.model_validate(job) if job else None,
         pose=pose, events=events, events_reviewed=_is_reviewed(db, swing.id),
+        outcome=get_outcome(db, swing.id),
         metrics=[MetricOut.model_validate(m) for m in metrics],
         pipeline_version=PIPELINE_VERSION,
     )

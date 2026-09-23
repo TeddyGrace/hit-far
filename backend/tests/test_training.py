@@ -90,10 +90,15 @@ def test_train_register_promote_redetect(authed, sample_video, fake_pose, fake_g
     assert runs[0]["id"] == job["id"] and runs[0]["status"] == "done", runs[0]
     models = {m["name"]: m for m in authed.get("/api/models").json()}
     learned = models["event-bilstm"]
-    assert learned["status"] == "experimental"
     em = learned["eval_metrics"]
     assert em["golfdb_test"]["n"] == 12 and 0 <= em["golfdb_test"]["pce"] <= 1
     assert "rules_golfdb_test_face_on" in em and em["n_train_golfdb"] > 20
+    # Auto-promoted only when it beats the rules on held-out face-on swings.
+    beats = em["golfdb_test_face_on"]["pce"] > em["rules_golfdb_test_face_on"]["pce"]
+    assert learned["status"] == ("active" if beats else "experimental")
+    assert em.get("auto_promoted", False) is beats
+    while worker.run_once("worker"):  # drain re-detections queued by an auto-promotion
+        pass
 
     # Promote -> becomes the active event model; the rule baseline is kept (deprecated).
     after = {m["name"]: m for m in authed.post(f"/api/models/{learned['id']}/promote").json()}
@@ -153,6 +158,36 @@ def test_reviewed_swings_become_training_data(authed, sample_video, fake_pose): 
 
     authed.put(f"/api/swings/{swing_id}/review", json={"reviewed": False})
     assert authed.get("/api/training/status").json() == {"reviewed_swings": 0}
+
+
+def test_auto_promote_rules(engine):
+    from app.db import get_sessionmaker
+    from app.models import Model, ModelStatus
+    from app.pipeline.registry import TASK_EVENTS
+    from app.training.train_events import auto_promote
+
+    def em(mine, rules, self_m=None, self_r=None):
+        d = {"golfdb_test_face_on": {"n": 50, "pce": mine}, "rules_golfdb_test_face_on": {"n": 50, "pce": rules}}
+        if self_m is not None:
+            d |= {"self_holdout": {"n": 3, "pce": self_m}, "rules_self_holdout": {"n": 3, "pce": self_r}}
+        return d
+
+    with get_sessionmaker()() as db:
+        rules = Model(name="rule-events", version="t", task=TASK_EVENTS, status=ModelStatus.active)
+        worse = Model(name="m", version="1", task=TASK_EVENTS, checkpoint_uri="x", eval_metrics=em(0.7, 0.8))
+        worse_on_mine = Model(name="m", version="2", task=TASK_EVENTS, checkpoint_uri="x",
+                              eval_metrics=em(0.9, 0.8, 0.5, 0.7))
+        good = Model(name="m", version="3", task=TASK_EVENTS, checkpoint_uri="x", eval_metrics=em(0.9, 0.8))
+        not_better_than_active = Model(name="m", version="4", task=TASK_EVENTS, checkpoint_uri="x",
+                                       eval_metrics=em(0.85, 0.8))
+        db.add_all([rules, worse, worse_on_mine, good, not_better_than_active])
+        db.flush()
+        assert not auto_promote(db, worse) and not auto_promote(db, worse_on_mine)
+        assert auto_promote(db, good) and good.status == ModelStatus.active and rules.status == ModelStatus.deprecated
+        assert not auto_promote(db, not_better_than_active) and good.status == ModelStatus.active
+        for m in (rules, worse, worse_on_mine, good, not_better_than_active):
+            db.delete(m)
+        db.commit()
 
 
 def test_heartbeat_refreshes_lock(engine):

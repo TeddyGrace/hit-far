@@ -11,11 +11,14 @@ from app.models import Job, JobStatus
 JOB_PROCESS_VIDEO = "process_video"
 JOB_DETECT_EVENTS = "detect_events"
 JOB_TRAIN_EVENTS = "train_events"
+JOB_RECOMPUTE_METRICS = "recompute_metrics"
+JOB_TRAIN_OUTCOMES = "train_outcomes"
 
 # Which job types each worker role consumes. Training runs for hours on its own service so it
-# never blocks swing processing.
+# never blocks swing processing. Outcome models are small tabular models that train in seconds, so
+# the processing worker runs them.
 ROLE_JOB_TYPES = {
-    "worker": (JOB_PROCESS_VIDEO, JOB_DETECT_EVENTS),
+    "worker": (JOB_PROCESS_VIDEO, JOB_DETECT_EVENTS, JOB_RECOMPUTE_METRICS, JOB_TRAIN_OUTCOMES),
     "trainer": (JOB_TRAIN_EVENTS,),
 }
 
@@ -79,6 +82,20 @@ def fail(db: Session, job_id: uuid.UUID, error: str, retryable: bool = True) -> 
     else:
         job.status = JobStatus.failed
     db.commit()
+
+
+def pending(db: Session, type_: str) -> Job | None:
+    """A queued or running job of this type, if any."""
+    return db.scalar(select(Job).where(Job.type == type_, Job.status.in_([JobStatus.queued, JobStatus.running]))
+                     .limit(1))
+
+
+def enqueue_once(db: Session, type_: str, payload: dict) -> Job | None:
+    """Enqueue unless one of this type is already waiting to run (running ones don't count: they
+    may have read the data before the change that triggered this)."""
+    if db.scalar(select(Job).where(Job.type == type_, Job.status == JobStatus.queued).limit(1)):
+        return None
+    return enqueue(db, type_, payload)
 
 
 def latest_for(db: Session, subject_id: uuid.UUID) -> Job | None:

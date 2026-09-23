@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink, Route, Routes, useNavigate } from "react-router-dom";
 import { api, setUnauthorizedHandler } from "./api";
+import Analysis from "./pages/Analysis";
 import Login from "./pages/Login";
 import Models from "./pages/Models";
 import SessionDetail from "./pages/SessionDetail";
@@ -32,6 +33,7 @@ export default function App() {
           <NavLink to="/" end>
             Sessions
           </NavLink>
+          <NavLink to="/analysis">Analysis</NavLink>
           <NavLink to="/models">Models</NavLink>
         </nav>
         <button
@@ -50,6 +52,7 @@ export default function App() {
           <Route path="/" element={<Sessions />} />
           <Route path="/sessions/:id" element={<SessionDetail />} />
           <Route path="/swings/:id" element={<SwingView />} />
+          <Route path="/analysis" element={<Analysis />} />
           <Route path="/models" element={<Models />} />
           <Route path="*" element={<p>Not found.</p>} />
         </Routes>

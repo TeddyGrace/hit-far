@@ -58,6 +58,15 @@ class Settings(BaseSettings):
     golfdb_videos_url: str = "https://drive.google.com/file/d/1uBwRxFxW04EqG87VCoX3l6vXeV5T5JYJ/view"
     train_workers: int | None = None  # pose-extraction processes; default = CPU count
 
+    # Outcome models: retrain after this many outcome tags/edits. The LLM "explain in words" button
+    # is off by default; the models, not the LLM, produce the findings.
+    outcome_retrain_every: int = 5
+    outcome_llm_explain: bool = False
+
+    # On API start, queue housekeeping jobs: metric recompute after a formula change, and the first
+    # event-model training run if no trained event model exists yet.
+    auto_start_jobs: bool = True
+
     # Worker
     worker_poll_interval_s: float = 2.0
     job_lock_timeout_s: int = 60 * 30
