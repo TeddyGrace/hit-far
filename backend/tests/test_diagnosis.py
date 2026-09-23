@@ -208,11 +208,33 @@ def test_sdk_request_shape_and_parsing():
     res = claude_mod.call_claude("SYS", [{"type": "text", "text": "hi"}], output_schema(), client=_sdk_client(handler))
     assert res.output.faults[0].fault == "lateral_sway" and res.model == "claude-opus-5"
     b = seen["body"]
-    assert b["model"] == "claude-opus-5" and b["fallbacks"] == "default"
-    assert "server-side-fallback-2026-07-01" in seen["beta"]
+    # Default: efficient model, no fallback parameter (only sent for models documented to accept it).
+    assert b["model"] == "claude-sonnet-5" and "fallbacks" not in b
+    assert "server-side-fallback" not in seen["beta"]
     assert b["thinking"] == {"type": "adaptive"}
-    assert b["output_config"]["format"]["type"] == "json_schema" and b["output_config"]["effort"] == "high"
+    assert b["output_config"]["format"]["type"] == "json_schema" and b["output_config"]["effort"] == "medium"
     assert b["system"][0]["cache_control"] == {"type": "ephemeral"}
+
+
+def test_sdk_request_enables_fallback_for_opus(monkeypatch):
+    import json as _json
+
+    import httpx2 as httpx
+
+    from app.config import get_settings
+    from app.diagnosis.prompt import output_schema
+
+    monkeypatch.setattr(get_settings(), "diagnosis_model", "claude-opus-5")
+    seen = {}
+
+    def handler(request):
+        seen["body"] = _json.loads(request.content)
+        seen["beta"] = request.headers.get("anthropic-beta", "")
+        return httpx.Response(200, json=_message())
+
+    claude_mod.call_claude("SYS", [], output_schema(), client=_sdk_client(handler))
+    assert seen["body"]["model"] == "claude-opus-5" and seen["body"]["fallbacks"] == "default"
+    assert "server-side-fallback-2026-07-01" in seen["beta"]
 
 
 def test_sdk_refusal_and_malformed_output():

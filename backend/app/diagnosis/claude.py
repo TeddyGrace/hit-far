@@ -53,6 +53,11 @@ class ClaudeResult:
     usage: dict
 
 
+# Models documented to accept server-side refusal fallback (`fallbacks: "default"`). Other
+# models get the plain request; a refusal is still detected and reported.
+FALLBACK_MODELS = {"claude-opus-5", "claude-fable-5-1"}
+
+
 def is_configured() -> bool:
     return bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"))
 
@@ -64,17 +69,19 @@ def call_claude(system: str, content: list[dict], schema: dict, client=None) -> 
         raise NotConfigured("ANTHROPIC_API_KEY is not set on the API service")
     s = get_settings()
     client = client or anthropic.Anthropic(timeout=s.diagnosis_timeout_s, max_retries=2)
+    extra = {}
+    if s.diagnosis_model in FALLBACK_MODELS:
+        # Route a (rare, false-positive) policy decline to Anthropic's recommended fallback model.
+        extra = {"betas": ["server-side-fallback-2026-07-01"], "fallbacks": "default"}
     try:
         response = client.beta.messages.create(
             model=s.diagnosis_model,
             max_tokens=16000,
             thinking={"type": "adaptive"},
             output_config={"effort": s.diagnosis_effort, "format": {"type": "json_schema", "schema": schema}},
-            # Route a (rare, false-positive) policy decline to Anthropic's recommended fallback model.
-            betas=["server-side-fallback-2026-07-01"],
-            fallbacks="default",
             system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
             messages=[{"role": "user", "content": content}],
+            **extra,
         )
     except anthropic.AuthenticationError as e:
         raise DiagnosisError("Claude API key was rejected") from e

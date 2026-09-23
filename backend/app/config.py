@@ -47,8 +47,10 @@ class Settings(BaseSettings):
     golfer_handedness: Literal["right", "left"] = "right"
 
     # Diagnosis (Claude). The SDK reads ANTHROPIC_API_KEY from the environment.
-    diagnosis_model: str = "claude-opus-5"
-    diagnosis_effort: Literal["low", "medium", "high", "xhigh", "max"] = "high"
+    # Sonnet 5 at medium effort: vision + structured output at well under Opus cost. Set
+    # DIAGNOSIS_MODEL=claude-opus-5 / DIAGNOSIS_EFFORT=high for the most thorough read.
+    diagnosis_model: str = "claude-sonnet-5"
+    diagnosis_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
     diagnosis_timeout_s: float = 120.0
 
     # Worker

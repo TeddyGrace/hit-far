@@ -122,7 +122,7 @@ Details:
 - **Stale diagnoses:** each diagnosis stores a snapshot of exactly what the model saw. If you later correct an event and the metrics change, it's flagged stale.
 - **Limits:** clubface angle and swing path aren't measured, so for ball-flight symptoms such as a slice the diagnosis says so and suggests how to find out (a down-the-line clip, or later club tracking).
 - **Setup:** set `ANTHROPIC_API_KEY` on the API service. Without it, diagnosing returns a clear 503 and the rest of the app works normally.
-- **Optional settings:** `DIAGNOSIS_MODEL` (default `claude-opus-5`), `DIAGNOSIS_EFFORT` (default `high`) and `DIAGNOSIS_TIMEOUT_S`. Server-side refusal fallback is on, so a rare false-positive refusal is rerouted instead of failing.
+- **Optional settings:** `DIAGNOSIS_MODEL` (default `claude-sonnet-5`), `DIAGNOSIS_EFFORT` (default `medium`) and `DIAGNOSIS_TIMEOUT_S`. The default is chosen for efficiency. For the most thorough read, set `DIAGNOSIS_MODEL=claude-opus-5` and `DIAGNOSIS_EFFORT=high`. Opus 5 also gets server-side refusal fallback, so a rare false-positive refusal is rerouted instead of failing.
 
 ## Layout
 
