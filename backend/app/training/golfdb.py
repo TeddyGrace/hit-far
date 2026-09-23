@@ -14,10 +14,12 @@ import json
 import logging
 import os
 import re
+import signal
 import tempfile
 import zipfile
 from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -112,6 +114,40 @@ def _download_videos(workdir: Path, progress: Callable[[str], None] | None = Non
     return hits[0].parent
 
 
+def _init_worker() -> None:
+    """Pool workers are forked from the job runner and inherit its "finish the current job" SIGTERM
+    handler, which makes them ignore SIGTERM. Restore the default, so that when the pool breaks (a
+    worker is OOM-killed and the pool terminates the rest) or the service stops, they exit instead
+    of leaving the job hung."""
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+
+
+def run_pool(tasks: list[tuple[int, str]], workers: int,
+             on_result: Callable[[tuple[int, bytes | None, str | None]], None],
+             fn: Callable[[tuple[int, str]], tuple[int, bytes | None, str | None]] | None = None) -> None:
+    """Run `fn` over the tasks in `workers` processes. If a worker dies (almost always out of
+    memory), finish the remaining tasks with half as many workers; give up only if one worker
+    can't manage."""
+    fn = fn or _extract_one
+    pending = dict(tasks)
+    while pending:
+        try:
+            with ProcessPoolExecutor(max_workers=workers, initializer=_init_worker) as pool:
+                futures = [pool.submit(fn, t) for t in list(pending.items())]
+                for fut in as_completed(futures):
+                    result = fut.result()
+                    pending.pop(result[0], None)
+                    on_result(result)
+        except BrokenProcessPool:
+            if workers == 1:
+                raise RuntimeError("pose extraction worker died even with a single worker "
+                                   "(out of memory?); give the trainer more memory") from None
+            workers = max(1, workers // 2)
+            log.warning("pose worker died (likely out of memory); retrying %d clips with %d workers",
+                        len(pending), workers)
+
+
 def _extract_one(args: tuple[int, str]) -> tuple[int, bytes | None, str | None]:
     """Worker-process entry: run pose on one clip. Returns npz bytes (or an error)."""
     clip_id, path = args
@@ -145,17 +181,19 @@ def ensure_pose(clips: list[Clip], progress: Callable[[str], None] = lambda s: N
                 errors[c.id] = "clip missing from zip"
         workers = workers or get_settings().train_workers or pose_workers()
         done = 0
-        with ProcessPoolExecutor(max_workers=workers) as pool:
-            futures = [pool.submit(_extract_one, t) for t in tasks]
-            for fut in as_completed(futures):
-                clip_id, data, err = fut.result()
-                if data is not None:
-                    st.put_bytes(pose_key(clip_id), data)
-                else:
-                    errors[clip_id] = err or "unknown error"
-                done += 1
-                if done % 10 == 0 or done == len(tasks):
-                    progress(f"golfdb: pose {done}/{len(tasks)}")
+
+        def on_result(result: tuple[int, bytes | None, str | None]) -> None:
+            nonlocal done
+            clip_id, data, err = result
+            if data is not None:
+                st.put_bytes(pose_key(clip_id), data)
+            else:
+                errors[clip_id] = err or "unknown error"
+            done += 1
+            if done % 10 == 0 or done == len(tasks):
+                progress(f"golfdb: pose {done}/{len(tasks)}")
+
+        run_pool(tasks, workers, on_result)
     if errors:
         log.warning("golfdb: %d clips failed pose extraction", len(errors))
     return errors

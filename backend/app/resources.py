@@ -7,7 +7,7 @@
 import os
 from pathlib import Path
 
-POSE_WORKER_MB = 900  # MediaPipe heavy + a decoded clip, per process, with headroom
+POSE_WORKER_MB = 1400  # MediaPipe heavy + a decoded clip, per process; 900 OOM-killed an 8 GB trainer
 
 
 def _read(path: str) -> str | None:
