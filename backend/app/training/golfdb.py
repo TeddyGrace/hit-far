@@ -13,6 +13,7 @@ import io
 import json
 import logging
 import os
+import re
 import tempfile
 import zipfile
 from collections.abc import Callable
@@ -21,8 +22,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.config import get_settings
-from app.resources import pose_workers
 from app.pipeline.posedata import PoseData
+from app.resources import pose_workers
 from app.storage import get_storage
 
 log = logging.getLogger(__name__)
@@ -65,7 +66,13 @@ def load_labels() -> list[Clip]:
     return [Clip(**r) for r in rows]
 
 
-def _download_videos(workdir: Path) -> Path:
+def drive_file_id(url: str) -> str | None:
+    """File id from a Google Drive share link (/file/d/<id>/... or ?id=<id>)."""
+    m = re.search(r"/file/d/([\w-]+)", url) or re.search(r"[?&]id=([\w-]+)", url)
+    return m.group(1) if m else None
+
+
+def _download_videos(workdir: Path, progress: Callable[[str], None] | None = None) -> Path:
     """Returns the directory containing <id>.mp4 clips."""
     st = get_storage()
     zpath = workdir / "videos_160.zip"
@@ -77,7 +84,18 @@ def _download_videos(workdir: Path) -> Path:
 
         url = get_settings().golfdb_videos_url
         log.info("golfdb: downloading clips from %s", url)
-        out = gdown.download(url, str(zpath), quiet=True, fuzzy=True)
+        last = [-1]
+
+        def report(done: int, total: int | None) -> None:
+            pct = int(done * 100 / total) if total else done // (1 << 20)
+            if progress and pct != last[0]:
+                last[0] = pct
+                progress(f"download {pct}%" if total else f"download {pct} MB")
+
+        # Pass the file id explicitly: gdown 6 parses share links differently from 5.x.
+        fid = drive_file_id(url)
+        kwargs = {"id": fid} if fid else {"url": url}
+        out = gdown.download(output=str(zpath), quiet=True, progress=report, retries=3, **kwargs)
         if not out or not zpath.exists() or zpath.stat().st_size < 1_000_000:
             raise RuntimeError(
                 "Could not download the GolfDB clips (Google Drive may be rate-limiting this file). "
@@ -117,7 +135,7 @@ def ensure_pose(clips: list[Clip], progress: Callable[[str], None] = lambda s: N
     progress(f"golfdb: downloading clips ({len(missing)} need pose)")
     errors: dict[int, str] = {}
     with tempfile.TemporaryDirectory(prefix="golfdb-") as tmp:
-        vdir = _download_videos(Path(tmp))
+        vdir = _download_videos(Path(tmp), progress)
         tasks = []
         for c in missing:
             p = vdir / f"{c.id}.mp4"

@@ -230,3 +230,32 @@ def test_ensure_pose_extracts_and_caches(engine, monkeypatch):
     pose = golfdb.load_pose(7)
     assert pose is not None and pose.detected.sum() > 50
     assert golfdb.ensure_pose(clips[:1]) == {}  # cached: nothing to do
+
+
+def test_golfdb_download_matches_installed_gdown(engine, monkeypatch, tmp_path):
+    """Calls gdown with arguments validated against the installed gdown's real signature."""
+    import inspect
+
+    gdown = pytest.importorskip("gdown")
+    real_sig = inspect.signature(gdown.download)
+    calls = []
+
+    def fake(*args, **kwargs):
+        bound = real_sig.bind(*args, **kwargs)  # TypeError here = the production bug
+        calls.append(bound.arguments)
+        with zipfile.ZipFile(bound.arguments["output"], "w") as z:
+            z.writestr("videos_160/1.mp4", b"x" * 2_000_000)
+        kwargs.get("progress", lambda d, t: None)(2_000_000, 2_000_000)
+        return bound.arguments["output"]
+
+    monkeypatch.setattr(gdown, "download", fake)
+    from app.storage import get_storage
+
+    get_storage().delete(golfdb.ZIP_KEY)
+    stages = []
+    vdir = golfdb._download_videos(tmp_path, stages.append)
+    assert (vdir / "1.mp4").exists() and calls[0]["id"] == "1uBwRxFxW04EqG87VCoX3l6vXeV5T5JYJ"
+    assert stages[-1] == "download 100%"
+    assert get_storage().exists(golfdb.ZIP_KEY)  # cached for the next run
+    get_storage().delete(golfdb.ZIP_KEY)
+    assert golfdb.drive_file_id("https://drive.google.com/open?id=abc-123") == "abc-123"
