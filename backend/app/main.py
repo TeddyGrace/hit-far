@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app import auth
 from app.config import get_settings
-from app.routers import diagnoses, local_storage, models_registry, sessions, swings, videos
+from app.routers import diagnoses, local_storage, models_registry, sessions, swings, training, videos
 from app.storage import S3Storage, get_storage
 
 log = logging.getLogger("hitfar")
@@ -51,6 +51,7 @@ app.include_router(videos.router)
 app.include_router(swings.router)
 app.include_router(models_registry.router)
 app.include_router(diagnoses.router)
+app.include_router(training.router)
 app.include_router(local_storage.router)
 
 

@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     diagnosis_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
     diagnosis_timeout_s: float = 120.0
 
+    # Training (event model). GolfDB: labels from GitHub, 160px clips from the authors' Drive link.
+    golfdb_labels_url: str = "https://raw.githubusercontent.com/wmcnally/golfdb/master/data/golfDB.pkl"
+    golfdb_videos_url: str = "https://drive.google.com/file/d/1uBwRxFxW04EqG87VCoX3l6vXeV5T5JYJ/view"
+    train_workers: int | None = None  # pose-extraction processes; default = CPU count
+
     # Worker
     worker_poll_interval_s: float = 2.0
     job_lock_timeout_s: int = 60 * 30

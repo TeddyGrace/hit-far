@@ -3,12 +3,21 @@
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import or_, select, true, update
 from sqlalchemy.orm import Session
 
 from app.models import Job, JobStatus
 
 JOB_PROCESS_VIDEO = "process_video"
+JOB_DETECT_EVENTS = "detect_events"
+JOB_TRAIN_EVENTS = "train_events"
+
+# Which job types each worker role consumes. Training runs for hours on its own service so it
+# never blocks swing processing.
+ROLE_JOB_TYPES = {
+    "worker": (JOB_PROCESS_VIDEO, JOB_DETECT_EVENTS),
+    "trainer": (JOB_TRAIN_EVENTS,),
+}
 
 
 def enqueue(db: Session, type_: str, payload: dict, subject_id: uuid.UUID | None = None) -> Job:
@@ -18,12 +27,14 @@ def enqueue(db: Session, type_: str, payload: dict, subject_id: uuid.UUID | None
     return job
 
 
-def claim(db: Session, lock_timeout_s: int) -> Job | None:
-    """Claim the next runnable job. Also reclaims jobs whose worker died mid-run."""
+def claim(db: Session, lock_timeout_s: int, types: tuple[str, ...] | None = None) -> Job | None:
+    """Claim the next runnable job. Also reclaims jobs whose worker died mid-run (no heartbeat -
+    `set_stage` refreshes the lock - for `lock_timeout_s`)."""
     now = datetime.now(timezone.utc)
     stale = now - timedelta(seconds=lock_timeout_s)
     job = db.scalar(
         select(Job)
+        .where(Job.type.in_(types) if types else true())
         .where(
             or_(
                 (Job.status == JobStatus.queued) & (Job.run_after <= now),
@@ -46,7 +57,8 @@ def claim(db: Session, lock_timeout_s: int) -> Job | None:
 
 
 def set_stage(db: Session, job_id: uuid.UUID, stage: str) -> None:
-    db.execute(update(Job).where(Job.id == job_id).values(stage=stage))
+    """Report progress; doubles as the heartbeat that keeps a long job from being reclaimed."""
+    db.execute(update(Job).where(Job.id == job_id).values(stage=stage[:50], locked_at=datetime.now(timezone.utc)))
     db.commit()
 
 

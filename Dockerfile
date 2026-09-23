@@ -1,4 +1,4 @@
-# One image for both Railway services: the API (default) and the worker (SERVICE_ROLE=worker).
+# One image for all Railway services: API (default), worker (SERVICE_ROLE=worker), trainer (SERVICE_ROLE=trainer).
 
 FROM node:22-slim AS web
 WORKDIR /web
@@ -15,6 +15,8 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app/backend
+# CPU-only PyTorch (~200 MB) for the learned event model; the default PyPI build bundles CUDA (GBs).
+RUN pip install "torch>=2.14,<2.15" --index-url https://download.pytorch.org/whl/cpu
 COPY backend/requirements.txt .
 RUN pip install -r requirements.txt
 

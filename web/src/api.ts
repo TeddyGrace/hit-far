@@ -96,6 +96,7 @@ export interface SwingDetail {
   job: Job | null;
   pose: { model: ModelRef; num_frames: number; mean_confidence: number | null; landmark_schema_version: string } | null;
   events: SwingEvent[];
+  events_reviewed: boolean;
   metrics: Metric[];
   pipeline_version: string;
 }
@@ -155,6 +156,15 @@ export interface Diagnosis {
   model: ModelRef | null;
   served_model: string | null;
   stale: boolean;
+}
+
+export interface TrainingJob extends Job {
+  payload: { config?: Record<string, unknown> };
+}
+export interface EvalResult {
+  n: number;
+  pce?: number;
+  per_event?: Record<string, number>;
 }
 
 export class ApiError extends Error {
@@ -218,6 +228,14 @@ export const api = {
     request<SwingDetail>("PUT", `/api/swings/${id}/events/${event}`, { frame_index }),
 
   listModels: () => request<ModelInfo[]>("GET", "/api/models"),
+
+  startEventTraining: (epochs = 40) => request<TrainingJob>("POST", "/api/training/events", { epochs }),
+  trainingJobs: () => request<TrainingJob[]>("GET", "/api/training/jobs"),
+  trainingStatus: () => request<{ reviewed_swings: number }>("GET", "/api/training/status"),
+  promoteModel: (id: string) => request<ModelInfo[]>("POST", `/api/models/${id}/promote`),
+  redetectAll: () => request<{ queued: number }>("POST", "/api/swings/redetect-events"),
+  setReviewed: (swingId: string, reviewed: boolean) =>
+    request<SwingDetail>("PUT", `/api/swings/${swingId}/review`, { reviewed }),
 
   listFaults: () => request<FaultInfo[]>("GET", "/api/faults"),
   listDiagnoses: (swingId: string) => request<Diagnosis[]>("GET", `/api/swings/${swingId}/diagnoses`),

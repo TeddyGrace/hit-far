@@ -17,6 +17,8 @@ from app.models import (
     EventType,
     Label,
     Metric,
+    Model,
+    ModelStatus,
     Pose3DMethod,
     Pose3DSequence,
     PoseSequence,
@@ -130,19 +132,53 @@ def run_pose_stage(
     return seq
 
 
+def active_event_model(db: Session) -> Model | None:
+    """The active event model; a trained (checkpointed) model wins over the rule baseline."""
+    rows = db.scalars(
+        select(Model).where(Model.task == TASK_EVENTS, Model.status == ModelStatus.active)
+        .order_by(Model.created_at.desc())
+    ).all()
+    trained = [m for m in rows if m.checkpoint_uri]
+    return trained[0] if trained else (rows[0] if rows else None)
+
+
 def run_event_stage(db: Session, swing: Swing, pose: PoseData) -> None:
-    model = get_or_create_model(db, events_mod.MODEL_NAME, events_mod.MODEL_VERSION, TASK_EVENTS,
+    rules = get_or_create_model(db, events_mod.MODEL_NAME, events_mod.MODEL_VERSION, TASK_EVENTS,
                                 notes="Rule-based baseline over the 2D pose time series (face-on)")
-    try:
-        result = events_mod.detect_events(pose, get_settings().golfer_handedness)
-    except events_mod.EventDetectionError as e:
-        raise PermanentError(str(e)) from e
+    model = active_event_model(db) or rules
+    handedness = get_settings().golfer_handedness
+    detected = None
+    if model.checkpoint_uri:
+        try:
+            from app.training.inference import detect_events_learned
+
+            detected = detect_events_learned(model.checkpoint_uri, pose, handedness)
+        except Exception:
+            # Never lose a swing to a model problem: fall back to the rule baseline.
+            log.exception("learned event model %s failed; using rules", model.version)
+            model = rules
+    if detected is None:
+        try:
+            detected = events_mod.detect_events(pose, handedness).events
+        except events_mod.EventDetectionError as e:
+            raise PermanentError(str(e)) from e
     # Same model + version is deterministic, so replace its rows; other models' rows are kept.
     db.execute(delete(SwingEvent).where(SwingEvent.swing_id == swing.id, SwingEvent.model_id == model.id))
-    for et, ev in result.events.items():
+    for et, ev in detected.items():
         db.add(SwingEvent(swing_id=swing.id, model_id=model.id, event_type=et, frame_index=ev.frame,
                           confidence=ev.confidence))
     db.commit()
+
+
+def redetect_events(db: Session, swing_id: uuid.UUID) -> None:
+    """Re-run event detection with the currently active model (reuses cached pose)."""
+    swing = db.get(Swing, swing_id)
+    seq = latest_pose_sequence(db, swing_id) if swing else None
+    if seq is None:
+        raise PermanentError(f"swing {swing_id} has no pose yet")
+    pose = load_pose(seq)
+    run_event_stage(db, swing, pose)
+    recompute_metrics(db, swing, pose)
 
 
 # --- Queries shared with the API ---------------------------------------------------------------

@@ -90,6 +90,7 @@ The whole project is **one Docker image, run as two services**: the API, which a
 2. **Create two services from this repo** (branch `main`). Both use the root `Dockerfile`, and `backend/start.sh` picks the role:
    - **API**: no `SERVICE_ROLE`. It runs `alembic upgrade head`, then serves the app. Generate a public domain for it, and optionally set the healthcheck path to `/api/health`.
    - **Worker**: `SERVICE_ROLE=worker`. It needs no domain. Give it at least 2 GB of RAM. Pose runs on CPU at about 80 ms per frame, so a 3 s clip at 240 fps takes roughly a minute.
+   - **Trainer**: `SERVICE_ROLE=trainer`, with the same variables as the worker. It runs only training jobs, and more vCPUs make pose extraction and training faster.
    - `deploy/railway.*.json` are optional config-as-code equivalents.
 3. **Set these variables on both services.** Use shared variables or reference variables.
 
@@ -107,6 +108,25 @@ The whole project is **one Docker image, run as two services**: the API, which a
 
    If you get signature or host errors, set `S3_ADDRESSING_STYLE=path`.
 4. **Browser uploads go straight to the bucket** through presigned URLs, so the bucket needs CORS for your origin. The API sets it at startup whenever `PUBLIC_ORIGIN` is set. Check the API logs for `bucket CORS set for …`.
+
+## Training the event model
+
+**Models → Train event model** trains a learned swing-event detector to replace the rule-based one.
+
+- **Where it runs:** on the `hit-far-trainer` Railway service, which handles only training jobs so a run never blocks swing processing.
+- **Data:** GolfDB's 1,400 labeled swings (CC BY-NC 4.0, fine for personal use). The labels come from the GolfDB GitHub repo. The 160×160 clips come from the authors' Google Drive link, with `GOLFDB_VIDEOS_URL` as an override.
+  - If Drive refuses the download (it rate-limits popular files), put `videos_160.zip` in the bucket at `datasets/golfdb/videos_160.zip` yourself and retry.
+- **Your swings:** swings you've marked **"All 8 events checked"** on the swing page are included and weighted up. Every 5th one is held out for scoring.
+- **Pose:** MediaPipe runs on every GolfDB clip in parallel across all CPU cores, with each clip's result cached in the bucket (`datasets/golfdb/pose/`). The first run takes a while on CPU; later runs skip it.
+- **Model:** a bidirectional LSTM that classifies each frame (8 events plus background) from normalized pose features: hip-centered, torso-scaled joints, their velocities and visibility.
+  - Training variation: random time-scaling (to cover any frame rate), mirroring (left-handers), padding with idle frames, and noise.
+  - At inference it tries several time scales and keeps the most confident one, so 240 fps slow-motion and 30 fps both work. The 8 events are decoded in order with dynamic programming.
+- **Evaluation:** PCE on GolfDB's held-out split 1, using GolfDB's own tolerance (`max(1, round((impact - address) / 30))` frames). It's reported overall and for face-on, next to the rule-based detector on the same swings, plus your held-out swings.
+- **Registry:** the checkpoint goes to `models/event-bilstm/<version>/model.pt`, and the model is registered as `experimental`, linked to a `datasets` row with its manifest.
+- **Promote** makes a model the active event detector. The previous one is kept (deprecated) and can be promoted back. **Re-run events on all swings** applies the active model to existing swings; your corrections still override it.
+- **Safety:** if a trained model fails to load or run, the pipeline falls back to the rule-based detector rather than failing the swing.
+
+Local development needs PyTorch: `pip install torch --index-url https://download.pytorch.org/whl/cpu`.
 
 ## Diagnosis (Claude proposes, you confirm)
 
@@ -145,7 +165,7 @@ web/src/
 
 These tables are already in the schema; the code for them is still to come.
 
-1. **Trained event model.** Train a BiLSTM or small transformer on pose sequences: pretrain on GolfDB, then fine-tune on the `labels` corrections. Register it as `experimental`, evaluate it on a held-out split, then promote it.
+1. **Trained event model:** the training pipeline is in place (see above). Next, run it on GolfDB, promote it if it beats the rules, and retrain as your reviewed swings accumulate.
 2. **Pose fine-tuning.** Fine-tune the keypoint model with a Label Studio round-trip for occluded and blurred frames (the top of the backswing, impact).
 3. **Club/shaft detector.** Bootstrap it from hand labels and grow it through the correction loop. Shaft-parallel events then stop using arm proxies.
 4. **Dual-camera calibration sessions.** Sync two cameras by clap or flash, then triangulate. Use the triangulated poses to fine-tune the monocular lifter and to fill `pose_3d_sequences.error_estimate`.

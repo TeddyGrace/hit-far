@@ -150,6 +150,7 @@ class SwingDetail(BaseModel):
     job: JobOut | None
     pose: PoseInfo | None
     events: list[EventOut]
+    events_reviewed: bool
     metrics: list[MetricOut]
     pipeline_version: str
 

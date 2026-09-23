@@ -48,6 +48,14 @@ def _primary_video(db: Session, swing: Swing) -> Video:
     return db.get(Video, swing.video_ids[0])
 
 
+def _is_reviewed(db: Session, swing_id: uuid.UUID) -> bool:
+    last = db.scalar(
+        select(Label).where(Label.task == "event_review", Label.target_type == "swing", Label.target_id == swing_id)
+        .order_by(Label.created_at.desc()).limit(1)
+    )
+    return bool(last and last.corrected_value.get("reviewed"))
+
+
 def swing_detail(db: Session, swing: Swing) -> SwingDetail:
     video = _primary_video(db, swing)
     playback = get_storage().presign_get(video.proxy_uri, 6 * 3600) if video.proxy_uri else None
@@ -94,7 +102,8 @@ def swing_detail(db: Session, swing: Swing) -> SwingDetail:
         created_at=swing.created_at,
         video=SwingVideo(**VideoOut.model_validate(video).model_dump(), playback_url=playback),
         job=JobOut.model_validate(job) if job else None,
-        pose=pose, events=events, metrics=[MetricOut.model_validate(m) for m in metrics],
+        pose=pose, events=events, events_reviewed=_is_reviewed(db, swing.id),
+        metrics=[MetricOut.model_validate(m) for m in metrics],
         pipeline_version=PIPELINE_VERSION,
     )
 

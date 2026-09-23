@@ -198,8 +198,16 @@ export default function SwingView() {
           <section>
             <h2>
               Events {saving && <span className="muted small">saving…</span>}
-              {toReview > 0 && <span className="chip busy">{toReview} to review</span>}
+              {toReview > 0 && !swing.events_reviewed && <span className="chip busy">{toReview} to review</span>}
             </h2>
+            <label className="inline small" title="Reviewed swings become training data for the event model">
+              <input
+                type="checkbox"
+                checked={swing.events_reviewed}
+                onChange={async (e) => setSwing(await api.setReviewed(swing.id, e.target.checked))}
+              />
+              All 8 events checked (use as training data)
+            </label>
             <table className="table events">
               <tbody>
                 {EVENT_TYPES.map((et, i) => {
