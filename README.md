@@ -87,14 +87,11 @@ The whole project is **one Docker image, run as two services**: the API, which a
 1. **Create a project** and add:
    - a **PostgreSQL** database
    - a **Bucket** (Railway Storage Bucket)
-2. **Create the API service** from this GitHub repo.
-   - Settings → Config-as-code → *Railway config file*: `deploy/railway.api.json`. This runs `alembic upgrade head` before each deploy and health-checks `/api/health`.
-   - Generate a public domain.
-3. **Create the worker service** from the same repo.
-   - Config file: `deploy/railway.worker.json`. Its start command is `python -m app.worker`.
-   - It needs no domain.
-   - Give it at least 2 GB of RAM. Pose runs on CPU at about 80 ms per frame, so a 3 s clip at 240 fps takes roughly a minute.
-4. **Set these variables on both services.** Use shared variables or reference variables.
+2. **Create two services from this repo** (branch `main`). Both use the root `Dockerfile`, and `backend/start.sh` picks the role:
+   - **API**: no `SERVICE_ROLE`. It runs `alembic upgrade head`, then serves the app. Generate a public domain for it, and optionally set the healthcheck path to `/api/health`.
+   - **Worker**: `SERVICE_ROLE=worker`. It needs no domain. Give it at least 2 GB of RAM. Pose runs on CPU at about 80 ms per frame, so a 3 s clip at 240 fps takes roughly a minute.
+   - `deploy/railway.*.json` are optional config-as-code equivalents.
+3. **Set these variables on both services.** Use shared variables or reference variables.
 
    | Variable | Value |
    |---|---|
@@ -108,7 +105,7 @@ The whole project is **one Docker image, run as two services**: the API, which a
    | `GOLFER_HANDEDNESS` | `right` or `left` |
 
    If you get signature or host errors, set `S3_ADDRESSING_STYLE=path`.
-5. **Browser uploads go straight to the bucket** through presigned URLs, so the bucket needs CORS for your origin. The API sets it at startup whenever `PUBLIC_ORIGIN` is set. Check the API logs for `bucket CORS set for …`.
+4. **Browser uploads go straight to the bucket** through presigned URLs, so the bucket needs CORS for your origin. The API sets it at startup whenever `PUBLIC_ORIGIN` is set. Check the API logs for `bucket CORS set for …`.
 
 ## Layout
 

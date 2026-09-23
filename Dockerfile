@@ -1,5 +1,4 @@
-# One image for both Railway services: the API (default CMD) and the worker (start command
-# `python -m app.worker`, set in deploy/railway.worker.json).
+# One image for both Railway services: the API (default) and the worker (SERVICE_ROLE=worker).
 
 FROM node:22-slim AS web
 WORKDIR /web
@@ -30,4 +29,4 @@ COPY backend/ .
 COPY --from=web /web/dist /app/web/dist
 
 EXPOSE 8000
-CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*'
+CMD ["sh", "/app/backend/start.sh"]
