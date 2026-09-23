@@ -123,3 +123,24 @@ label.inline { flex-direction: row; align-items: center; gap: 0.35rem; color: va
 .marker:active { cursor: grabbing; }
 .table.events button.link { text-align: left; }
 .table td.num { white-space: nowrap; }
+
+/* Diagnosis */
+.diagnosis textarea {
+  width: 100%; font: inherit; padding: 0.4rem 0.5rem; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--panel); color: var(--text); resize: vertical;
+}
+.diagnosis h3 { font-size: 0.85rem; margin: 0.75rem 0 0.25rem; }
+.dx-body { display: flex; flex-direction: column; gap: 0.5rem; }
+.fault-card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem 0.75rem; }
+.fault-card p { margin: 0.35rem 0; }
+.fault-head { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.likelihood { flex: 1; min-width: 60px; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+.likelihood > div { height: 100%; background: var(--accent); }
+.chips { display: flex; flex-wrap: wrap; gap: 0.3rem; margin: 0.3rem 0; }
+button.chip { cursor: pointer; font: inherit; font-size: 0.75rem; }
+.verdicts { display: flex; gap: 0.3rem; margin-top: 0.4rem; }
+button.small { padding: 0.15rem 0.55rem; font-size: 0.8rem; }
+.verdicts button.on.confirmed { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.verdicts button.on.rejected { background: var(--bad-soft); color: var(--bad); border-color: var(--bad); }
+.verdicts button.on.unsure { background: var(--warn-soft); color: var(--warn); border-color: var(--warn); }
+.bad-badge { background: var(--bad-soft); color: var(--bad); }

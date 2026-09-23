@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, EVENT_LABELS, EVENT_TYPES, EventType, PoseFrames, SwingDetail } from "../api";
+import DiagnosisPanel from "../components/DiagnosisPanel";
 import EventTimeline, { REVIEW_THRESHOLD } from "../components/EventTimeline";
 import MetricsTable from "../components/MetricsTable";
 import VideoOverlay from "../components/VideoOverlay";
@@ -85,7 +86,7 @@ export default function SwingView() {
   // Keyboard: ←/→ step (shift = 10), space play/pause, 1–8 jump to event, shift+1–8 set event here.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement).tagName === "INPUT" || (e.target as HTMLElement).tagName === "SELECT") return;
+      if (["INPUT", "SELECT", "TEXTAREA"].includes((e.target as HTMLElement).tagName)) return;
       const v = videoRef.current;
       if (!v) return;
       const step = e.shiftKey ? 10 : 1;
@@ -238,6 +239,13 @@ export default function SwingView() {
               </tbody>
             </table>
           </section>
+
+          <DiagnosisPanel
+            swingId={swing.id}
+            eventFrames={eventFrames}
+            refreshKey={swing.events.map((e) => e.frame_index).join(",")}
+            onSeek={seek}
+          />
 
           <section>
             <h2>Metrics</h2>

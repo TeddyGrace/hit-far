@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app import auth
 from app.config import get_settings
-from app.routers import local_storage, models_registry, sessions, swings, videos
+from app.routers import diagnoses, local_storage, models_registry, sessions, swings, videos
 from app.storage import S3Storage, get_storage
 
 log = logging.getLogger("hitfar")
@@ -16,6 +16,14 @@ log = logging.getLogger("hitfar")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     s = get_settings()
+    try:
+        from app.db import get_sessionmaker
+        from app.diagnosis.catalog import upsert_catalog
+
+        with get_sessionmaker()() as db:
+            upsert_catalog(db)
+    except Exception:
+        log.exception("could not sync the fault catalog")
     if s.app_password == "changeme":
         log.warning("APP_PASSWORD is the default; set it before deploying")
     if s.storage_backend == "s3" and s.public_origin:
@@ -42,6 +50,7 @@ app.include_router(sessions.router)
 app.include_router(videos.router)
 app.include_router(swings.router)
 app.include_router(models_registry.router)
+app.include_router(diagnoses.router)
 app.include_router(local_storage.router)
 
 

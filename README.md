@@ -103,9 +103,26 @@ The whole project is **one Docker image, run as two services**: the API, which a
    | `S3_ENDPOINT_URL`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_REGION` | from the bucket's credentials (`BUCKET_*` names are also accepted) |
    | `PUBLIC_ORIGIN` | the API's public URL, e.g. `https://hit-far-production.up.railway.app` |
    | `GOLFER_HANDEDNESS` | `right` or `left` |
+   | `ANTHROPIC_API_KEY` | API service only; enables diagnosis |
 
    If you get signature or host errors, set `S3_ADDRESSING_STYLE=path`.
 4. **Browser uploads go straight to the bucket** through presigned URLs, so the bucket needs CORS for your origin. The API sets it at startup whenever `PUBLIC_ORIGIN` is set. Check the API logs for `bucket CORS set for …`.
+
+## Diagnosis (Claude proposes, you confirm)
+
+On a swing's page, describe what's happening ("slicing with the driver") and press **Diagnose**.
+
+1. **Rules first.** The deterministic rule engine (`backend/app/diagnosis/rules.py`) checks the swing's metrics against the fault catalog's seed thresholds (`catalog.py`). These are tunable starting points, not ground truth.
+2. **Then Claude.** Claude receives the metrics (3D estimates flagged), the events (with confidence and whether you corrected them), the rule hits, four key frames with the skeleton drawn on, and your description. It returns structured proposals: faults with likelihoods, cited metrics and frames, what it saw in the frames, what *can't* be assessed from this video, and suggested checks.
+3. **Citations are checked.** Every cited metric value and frame number is compared with the stored data. Mismatches are marked **unverified** in the UI rather than shown as fact.
+4. **You decide.** Confirm, reject or mark unsure for each proposal, and add faults the model missed. Each verdict updates `diagnoses.human_confirmed_faults` and appends a `labels` row (`task=fault`), recording whether the fault was proposed and at what likelihood. Only your verdicts become labels; Claude's output never does.
+5. **Instructor check.** Set "Labeling as: instructor" to record an instructor's read separately, for the periodic calibration check against your own labels.
+
+Details:
+- **Stale diagnoses:** each diagnosis stores a snapshot of exactly what the model saw. If you later correct an event and the metrics change, it's flagged stale.
+- **Limits:** clubface angle and swing path aren't measured, so for ball-flight symptoms such as a slice the diagnosis says so and suggests how to find out (a down-the-line clip, or later club tracking).
+- **Setup:** set `ANTHROPIC_API_KEY` on the API service. Without it, diagnosing returns a clear 503 and the rest of the app works normally.
+- **Optional settings:** `DIAGNOSIS_MODEL` (default `claude-opus-5`), `DIAGNOSIS_EFFORT` (default `high`) and `DIAGNOSIS_TIMEOUT_S`. Server-side refusal fallback is on, so a rare false-positive refusal is rerouted instead of failing.
 
 ## Layout
 
@@ -133,6 +150,4 @@ These tables are already in the schema; the code for them is still to come.
 3. **Club/shaft detector.** Bootstrap it from hand labels and grow it through the correction loop. Shaft-parallel events then stop using arm proxies.
 4. **Dual-camera calibration sessions.** Sync two cameras by clap or flash, then triangulate. Use the triangulated poses to fine-tune the monocular lifter and to fill `pose_3d_sequences.error_estimate`.
 5. **Reference profiles and comparison.** Compare against archetypes or your own reference swings, with DTW event alignment and per-metric deltas.
-6. **Fault engine and coaching narrative.**
-   - The fault engine starts as rules from `fault_labels.metric_signature`. Once enough confirmed faults accumulate, it becomes gradient-boosted trees.
-   - A Claude pass on top turns symptoms into diagnoses with frame and metric citations and appropriate hedging.
+6. **Trained fault classifier.** Once enough confirmed verdicts accumulate, train gradient-boosted trees on metrics → confirmed faults to replace the seed rules, then evaluate them against held-out verdicts (and instructor labels).

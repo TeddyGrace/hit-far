@@ -107,6 +107,56 @@ export interface PoseFrames {
   frames: (number[] | null)[];
 }
 
+export type Verdict = "confirmed" | "rejected" | "unsure";
+export type Labeler = "self" | "instructor";
+
+export interface FaultInfo {
+  name: string;
+  title: string;
+  description: string;
+  assessable: boolean;
+  partial: boolean;
+  views: string[];
+  needs: string[];
+  rules: string[];
+}
+export interface Evidence {
+  metric: string;
+  event: string | null;
+  value: number;
+  note: string;
+}
+export interface ProposedFault {
+  fault: string;
+  likelihood: number;
+  evidence: Evidence[];
+  frames: number[];
+  explanation: string;
+  visual_observation: string | null;
+  unverified: string[];
+}
+export interface DiagnosisOutput {
+  summary: string;
+  faults: ProposedFault[];
+  cannot_assess: { topic: string; reason: string }[];
+  suggested_checks: string[];
+  narrative: string;
+  narrative_unverified_frames: number[];
+}
+export interface Diagnosis {
+  id: string;
+  swing_id: string;
+  created_at: string;
+  symptom_text: string | null;
+  error: string | null;
+  output: DiagnosisOutput | null;
+  rule_hits: { fault: string; metric: string; event: string | null; value: number; threshold: number }[] | null;
+  verdicts: Partial<Record<Labeler, Record<string, Verdict>>>;
+  model: ModelRef | null;
+  served_model: string | null;
+  stale: boolean;
+}
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -168,6 +218,13 @@ export const api = {
     request<SwingDetail>("PUT", `/api/swings/${id}/events/${event}`, { frame_index }),
 
   listModels: () => request<ModelInfo[]>("GET", "/api/models"),
+
+  listFaults: () => request<FaultInfo[]>("GET", "/api/faults"),
+  listDiagnoses: (swingId: string) => request<Diagnosis[]>("GET", `/api/swings/${swingId}/diagnoses`),
+  diagnose: (swingId: string, symptom_text: string) =>
+    request<Diagnosis>("POST", `/api/swings/${swingId}/diagnoses`, { symptom_text }),
+  setVerdict: (diagnosisId: string, fault: string, verdict: Verdict | null, labeled_by: Labeler = "self") =>
+    request<Diagnosis>("PUT", `/api/diagnoses/${diagnosisId}/faults/${fault}`, { verdict, labeled_by }),
 };
 
 /** PUT a file to a presigned URL with progress (fetch has no upload progress). */

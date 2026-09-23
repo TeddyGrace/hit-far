@@ -10,3 +10,4 @@ numpy>=2.4,<3
 opencv-python-headless>=5.0,<6
 mediapipe>=1.0.1,<1.1
 imageio-ffmpeg>=0.6,<1
+anthropic>=1.8,<2

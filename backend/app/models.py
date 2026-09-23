@@ -318,6 +318,17 @@ class Diagnosis(Base):
     model_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("models.id"))
     human_confirmed_faults: Mapped[dict | None] = mapped_column(JSONB)
     narrative: Mapped[str | None] = mapped_column(Text)
+    # Deterministic rule-engine hits that were given to the model.
+    rule_hits: Mapped[list | None] = mapped_column(JSONB)
+    # Exactly what the model saw (pipeline_version, metrics, events, key frames) + a hash, so a
+    # diagnosis is reproducible and can be flagged stale after corrections change the metrics.
+    inputs_snapshot: Mapped[dict | None] = mapped_column(JSONB)
+    # Full validated model output, with citation verification results.
+    output: Mapped[dict | None] = mapped_column(JSONB)
+    # served_model (may differ from requested on a fallback), usage, prompt/catalog versions.
+    meta: Mapped[dict | None] = mapped_column(JSONB)
+    error: Mapped[str | None] = mapped_column(Text)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _created()
 
 

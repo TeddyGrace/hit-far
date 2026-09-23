@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     proxy_max_side: int = 1280
     golfer_handedness: Literal["right", "left"] = "right"
 
+    # Diagnosis (Claude). The SDK reads ANTHROPIC_API_KEY from the environment.
+    diagnosis_model: str = "claude-opus-5"
+    diagnosis_effort: Literal["low", "medium", "high", "xhigh", "max"] = "high"
+    diagnosis_timeout_s: float = 120.0
+
     # Worker
     worker_poll_interval_s: float = 2.0
     job_lock_timeout_s: int = 60 * 30

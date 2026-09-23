@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -165,3 +166,44 @@ class PoseFrames(BaseModel):
     connections: list[tuple[int, int]]
     # frames[t] = flat [x0, y0, v0, x1, y1, v1, ...] in pixels, or null when no person detected
     frames: list[list[float] | None]
+
+
+# --- Diagnosis ---------------------------------------------------------------------------------
+
+Verdict = Literal["confirmed", "rejected", "unsure"]
+Labeler = Literal["self", "instructor"]
+
+
+class FaultOut(BaseModel):
+    name: str
+    title: str
+    description: str
+    assessable: bool
+    partial: bool
+    views: list[str]
+    needs: list[str]
+    rules: list[str]
+
+
+class DiagnoseIn(BaseModel):
+    symptom_text: str = ""
+
+
+class VerdictIn(BaseModel):
+    verdict: Verdict | None  # null clears the verdict
+    labeled_by: Labeler = "self"
+
+
+class DiagnosisOut(BaseModel):
+    id: uuid.UUID
+    swing_id: uuid.UUID
+    created_at: datetime
+    symptom_text: str | None
+    error: str | None
+    output: dict | None
+    rule_hits: list | None
+    # {"self": {fault: verdict}, "instructor": {fault: verdict}}
+    verdicts: dict[str, dict[str, str]]
+    model: ModelRef | None
+    served_model: str | None
+    stale: bool
