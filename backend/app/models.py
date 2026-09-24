@@ -125,6 +125,7 @@ class RecordingSession(Base):
     # Nullable only for rows from before users existed; API start-up assigns those to the first user.
     user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), index=True)
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    name: Mapped[str | None] = mapped_column(String(200))
     location: Mapped[str | None] = mapped_column(String(200))
     club_used: Mapped[str | None] = mapped_column(String(50))
     notes: Mapped[str | None] = mapped_column(Text)

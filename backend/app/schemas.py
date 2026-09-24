@@ -13,6 +13,7 @@ class ORM(BaseModel):
 
 class SessionIn(BaseModel):
     recorded_at: datetime | None = None
+    name: str | None = None
     location: str | None = None
     club_used: str | None = None
     notes: str | None = None
@@ -20,6 +21,7 @@ class SessionIn(BaseModel):
 
 class SessionPatch(BaseModel):
     recorded_at: datetime | None = None
+    name: str | None = None
     location: str | None = None
     club_used: str | None = None
     notes: str | None = None
@@ -28,6 +30,7 @@ class SessionPatch(BaseModel):
 class SessionOut(ORM):
     id: uuid.UUID
     recorded_at: datetime
+    name: str | None
     location: str | None
     club_used: str | None
     notes: str | None
