@@ -169,6 +169,58 @@ def test_tagging_trains_and_promotes_automatically(authed, fast_cv):
     assert versions[models[0]["version"]]["status"] == "active"
 
 
+def test_draws_and_fades_are_good_shots():
+    from app.outcomes.problems import PROBLEMS
+
+    hook, slice_ = PROBLEMS["hook"], PROBLEMS["slice"]
+    assert {s: hook.label({"shape": s}) for s in ("hook", "draw", "straight", "fade", "slice")} == {
+        "hook": 1, "draw": 0, "straight": 0, "fade": 0, "slice": 0}
+    assert {s: slice_.label({"shape": s}) for s in ("slice", "fade", "straight", "draw", "hook")} == {
+        "slice": 1, "fade": 0, "straight": 0, "draw": 0, "hook": 0}
+    assert hook.label({"shape": None}) is None
+
+
+def test_models_from_an_older_problem_definition_are_replaced(authed, fast_cv):
+    from sqlalchemy import select
+
+    from app.automation import queue_startup_jobs
+    from app.db import get_sessionmaker
+    from app.models import Job, JobStatus, Model, ModelStatus, User
+    from app.outcomes.problems import PROBLEMS_VERSION
+
+    for sid, shape in _make_swings(40):
+        authed.put(f"/api/swings/{sid}/outcome", json={"shape": shape})
+    assert worker.run_once("worker") is True
+    with get_sessionmaker()() as db:
+        # Keep start-up from also queuing the first event-model training.
+        db.add(Job(type=jobs.JOB_TRAIN_EVENTS, payload={}, status=JobStatus.failed))
+        db.commit()
+        assert service.users_with_stale_models(db) == []
+        assert queue_startup_jobs(db) == []  # current models: nothing to retrain
+        uid = db.scalar(select(User.id).where(User.username == "owner"))
+        old = service.active_outcome_model(db, "slice", uid)
+        assert old.eval_metrics["problems_version"] == PROBLEMS_VERSION
+        # Pretend both were trained before draws and fades counted as good shots.
+        old.eval_metrics = {k: v for k, v in old.eval_metrics.items() if k != "problems_version"}
+        hook = Model(name="outcome-hook", version="old", task="outcome_hook", eval_metrics={"kind": "logreg"},
+                     status=ModelStatus.active, user_id=uid)
+        db.add(hook)
+        db.commit()
+        old_id, hook_id = old.id, hook.id
+        assert service.users_with_stale_models(db) == [uid]
+        assert queue_startup_jobs(db) == [f"{jobs.JOB_TRAIN_OUTCOMES} x1"]
+
+    assert worker.run_once("worker") is True
+    with get_sessionmaker()() as db:
+        assert db.get(Model, old_id).status == ModelStatus.deprecated
+        new = service.active_outcome_model(db, "slice", uid)
+        assert new.id != old_id and new.eval_metrics["problems_version"] == PROBLEMS_VERSION
+        assert new.eval_metrics["compared_to"]["stale_problem_definition"] is True
+        # No hooks tagged: the problem can't be trained, so the stale hook model is retired.
+        assert db.get(Model, hook_id).status == ModelStatus.deprecated
+        assert service.users_with_stale_models(db) == []
+
+
 def test_outcome_tag_audit_and_clear(authed, sample_video, fake_pose):  # noqa: F811
     sess, _ = _upload(authed, sample_video)
     worker.run_once("worker")
