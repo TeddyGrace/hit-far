@@ -1,6 +1,6 @@
 # hit-far
 
-A personal golf swing analysis app. You upload a swing video, and it runs pose estimation, finds the swing events and computes deterministic biomechanics metrics. You can then review everything in a simple React viewer and correct it by hand.
+A personal golf swing analysis app. You upload a swing video, and it runs pose estimation, finds the swing events and computes deterministic biomechanics metrics. You can then review everything in a React viewer and correct it by hand.
 
 This is **v0, a vertical slice**. The whole data model from the project brief exists as tables. The perception, event and metrics pipeline runs end to end on baseline models, and every output is attributed to the model that produced it. Trained models, club tracking, 3D calibration, comparison and diagnosis build on top of this (see [Roadmap](#roadmap)).
 
