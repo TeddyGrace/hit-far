@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models import CameraRole, EventType, JobStatus, ModelStatus, VideoStatus
 
@@ -195,6 +195,8 @@ class SwingDetail(BaseModel):
 class SwingPatch(BaseModel):
     is_reference: bool | None = None
     club_used: str | None = None
+    # Display name, stored on the primary video (shown wherever its filename is).
+    name: str | None = Field(None, min_length=1, max_length=300)
 
 
 class PoseFrames(BaseModel):

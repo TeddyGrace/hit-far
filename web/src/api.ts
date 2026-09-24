@@ -395,7 +395,7 @@ export const api = {
   deleteVideo: (videoId: string) => request<void>("DELETE", `/api/videos/${videoId}`),
 
   getSwing: (id: string) => request<SwingDetail>("GET", `/api/swings/${id}`),
-  updateSwing: (id: string, body: { is_reference?: boolean; club_used?: string | null }) =>
+  updateSwing: (id: string, body: { is_reference?: boolean; club_used?: string | null; name?: string }) =>
     request<SwingDetail>("PATCH", `/api/swings/${id}`, body),
   getPose: (id: string) => request<PoseFrames>("GET", `/api/swings/${id}/pose`),
   correctEvent: (id: string, event: EventType, frame_index: number | null) =>

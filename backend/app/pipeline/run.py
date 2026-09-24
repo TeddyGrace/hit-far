@@ -53,7 +53,8 @@ def preprocess_video(db: Session, video: Video, workdir: Path) -> None:
     if video.status == VideoStatus.preprocessed and video.proxy_uri:
         return
     st = get_storage()
-    ext = Path(video.original_filename or "video.mp4").suffix.lower() or ".mp4"
+    # file_uri keeps the upload's extension; original_filename is a user-editable display name.
+    ext = Path(video.file_uri).suffix.lower() or ".mp4"
     raw = workdir / f"raw{ext}"
     st.download_file(video.file_uri, raw)
 

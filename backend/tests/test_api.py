@@ -106,10 +106,19 @@ def test_duplicate_upload_is_rejected(authed, sample_video, fake_pose):
 def test_reprocess_and_delete(authed, sample_video, fake_pose):
     sess, video = _upload(authed, sample_video)
     worker.run_once()
+
+    # Renaming (no extension) changes the display name and doesn't break reprocessing.
+    swing_id = authed.get(f"/api/sessions/{sess['id']}").json()["videos"][0]["swing_id"]
+    renamed = authed.patch(f"/api/swings/{swing_id}", json={"name": "  Driver, good one "}).json()
+    assert renamed["video"]["original_filename"] == "Driver, good one"
+    assert authed.get(f"/api/sessions/{sess['id']}").json()["videos"][0]["original_filename"] == "Driver, good one"
+    assert authed.patch(f"/api/swings/{swing_id}", json={"name": "   "}).status_code == 422
+
     r = authed.post(f"/api/videos/{video['id']}/reprocess", json={"force": True})
     assert r.status_code == 200
     assert authed.post(f"/api/videos/{video['id']}/reprocess", json={"force": True}).status_code == 409
     worker.run_once()
+    assert authed.get(f"/api/sessions/{sess['id']}").json()["videos"][0]["status"] == "preprocessed"
     assert authed.delete(f"/api/sessions/{sess['id']}").status_code == 204
     assert authed.get(f"/api/sessions/{sess['id']}").status_code == 404
 

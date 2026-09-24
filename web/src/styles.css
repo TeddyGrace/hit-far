@@ -98,6 +98,8 @@ label.inline { flex-direction: row; align-items: center; gap: 0.35rem; color: va
 .error-details pre { white-space: pre-wrap; font-size: 0.75rem; max-height: 200px; overflow: auto; }
 
 .swing-header { display: flex; align-items: center; gap: 1.5rem; }
+.swing-name { cursor: text; }
+.swing-name-input { font: inherit; font-size: 1.4rem; font-weight: 600; margin: 0.4rem 0 1rem; min-width: 0; flex: 0 1 40ch; }
 .swing-layout { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 1rem; align-items: start; }
 @media (max-width: 1000px) { .swing-layout { grid-template-columns: 1fr; } }
 .side { display: flex; flex-direction: column; gap: 1.25rem; }

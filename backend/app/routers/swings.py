@@ -125,7 +125,13 @@ def get_swing(swing_id: uuid.UUID, db: Session = Depends(get_db), user: User = D
 def update_swing(swing_id: uuid.UUID, body: SwingPatch, db: Session = Depends(get_db),
                  user: User = Depends(current_user)):
     swing = get_swing_or_404(db, swing_id, user)
-    for k, v in body.model_dump(exclude_unset=True).items():
+    changes = body.model_dump(exclude_unset=True)
+    if "name" in changes:
+        name = (changes.pop("name") or "").strip()
+        if not name:
+            raise HTTPException(422, "name must not be empty")
+        _primary_video(db, swing).original_filename = name
+    for k, v in changes.items():
         setattr(swing, k, v)
     db.commit()
     return swing_detail(db, swing)
