@@ -15,9 +15,10 @@ from app.pipeline.metrics import PIPELINE_VERSION
 from app.pipeline.run import (
     CLUB_LABEL_TASK,
     EVENT_LABEL_TASK,
-    club_corrections,
+    club_labels,
     effective_club,
     event_corrections,
+    latest_club_track,
     latest_pose_sequence,
     load_pose,
     predicted_events,
@@ -173,28 +174,37 @@ def correct_event(swing_id: uuid.UUID, event_type: EventType, body: EventCorrect
     return swing_detail(db, swing)
 
 
+def _xy(p) -> list[float] | None:
+    return None if not all(map(math.isfinite, p)) else [round(float(p[0]), 1), round(float(p[1]), 1)]
+
+
 @router.get("/{swing_id}/club", response_model=ClubFrames)
 def get_club(swing_id: uuid.UUID, db: Session = Depends(get_db), user: User = Depends(current_user)):
     swing = get_swing_or_404(db, swing_id, user)
     track = effective_club(db, swing.id)
     if track is None:
         raise HTTPException(404, "no club track for this swing yet")
-    corr = club_corrections(db, swing.id)
+    labels = club_labels(db, swing.id)
+    model = db.get(Model, latest_club_track(db, swing.id).model_id)
     return ClubFrames(
         fps=track.fps, length_px=round(track.length_px, 1),
         angle_deg=[None if not math.isfinite(a) else round(math.degrees(a) % 360, 1) for a in track.angle],
         confidence=[round(float(c), 2) for c in track.confidence],
-        grip=[None if not all(map(math.isfinite, g)) else [round(float(g[0]), 1), round(float(g[1]), 1)]
-              for g in track.grip],
-        corrected=sorted(corr),
+        grip=[_xy(g) for g in track.grip],
+        corrected=sorted(labels),
+        confirmed=sorted(f for f, v in labels.items() if v.get("confirmed")),
+        clubhead=None if track.clubhead is None else [_xy(p) for p in track.clubhead],
+        model_name=model.name if model else None, model_version=model.version if model else None,
     )
 
 
 @router.put("/{swing_id}/club/{frame_index}", response_model=SwingDetail)
 def correct_club(swing_id: uuid.UUID, frame_index: int, body: ClubCorrectionIn, db: Session = Depends(get_db),
                  user: User = Depends(current_user)):
-    """Set the shaft direction on one frame (degrees, image plane, grip -> clubhead, 0 = right,
-    90 = down). null reverts that frame to the tracker. Corrections are future training data."""
+    """Label the shaft on one frame: a fix (direction in degrees, image plane, grip -> clubhead,
+    0 = right, 90 = down, plus the clubhead point you clicked), or `confirm` that the shaft shown is
+    right. angle_deg null (without confirm) reverts that frame to the tracker. Labels train the club
+    detector and decide whether it replaces the line tracker."""
     swing = get_swing_or_404(db, swing_id, user)
     video = _primary_video(db, swing)
     if video.num_frames and not 0 <= frame_index < video.num_frames:
@@ -203,12 +213,26 @@ def correct_club(swing_id: uuid.UUID, frame_index: int, body: ClubCorrectionIn, 
     if track is None:
         raise HTTPException(409, "no club track for this swing yet")
     predicted = track.angle[frame_index] if frame_index < len(track.angle) else float("nan")
+    angle = body.angle_deg
+    if body.confirm:
+        if not math.isfinite(predicted):
+            raise HTTPException(409, "the shaft isn't tracked on this frame; fix it instead")
+        angle = math.degrees(predicted)
+    head = body.clubhead_xy
+    if body.confirm and head is None:
+        p = track.clubhead_at(frame_index)
+        head = None if p is None else (float(p[0]), float(p[1]))
     db.add(Label(task=CLUB_LABEL_TASK, target_type="swing", target_id=swing.id, corrected_value={
         "frame_index": frame_index,
-        "angle_deg": None if body.angle_deg is None else body.angle_deg % 360,
+        "angle_deg": None if angle is None else angle % 360,
         "predicted_angle_deg": round(math.degrees(predicted) % 360, 2) if math.isfinite(predicted) else None,
+        "clubhead_xy": None if head is None or angle is None else [round(head[0], 1), round(head[1], 1)],
+        "confirmed": bool(body.confirm),
         "video_id": str(video.id),
     }))
     db.commit()
     recompute_metrics(db, swing)
+    from app.training.train_club import maybe_queue_training
+
+    maybe_queue_training(db)
     return swing_detail(db, swing)

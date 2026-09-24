@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     outcome_retrain_every: int = 5
     outcome_llm_explain: bool = False
 
+    # Club detector (stage 2): once its data gate is met, retrain after this many new shaft checks.
+    club_retrain_every: int = 25
+
     # On API start, queue housekeeping jobs: metric recompute after a formula change, and the first
     # event-model training run if no trained event model exists yet.
     auto_start_jobs: bool = True

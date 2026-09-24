@@ -86,11 +86,20 @@ export default function VideoOverlay({
         ctx.strokeStyle = corrected ? "#5aa9ff" : conf >= CLUB_CONF ? "#ffd84a" : "rgba(255,140,60,0.8)";
         ctx.setLineDash(corrected || conf >= CLUB_CONF ? [] : [6, 5]);
         ctx.lineWidth = 2.5;
+        // The learned detector also finds the clubhead: draw the shaft to it and mark it.
+        const head = club.clubhead?.[frame] ?? null;
+        const end = head ?? [g[0] + Math.cos(rad) * club.length_px, g[1] + Math.sin(rad) * club.length_px];
         ctx.beginPath();
         ctx.moveTo(ox + g[0] * scale, oy + g[1] * scale);
-        ctx.lineTo(ox + (g[0] + Math.cos(rad) * club.length_px) * scale, oy + (g[1] + Math.sin(rad) * club.length_px) * scale);
+        ctx.lineTo(ox + end[0] * scale, oy + end[1] * scale);
         ctx.stroke();
         ctx.setLineDash([]);
+        if (head) {
+          ctx.fillStyle = ctx.strokeStyle;
+          ctx.beginPath();
+          ctx.arc(ox + head[0] * scale, oy + head[1] * scale, 5, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
 
       const kp = pose.frames[frame];

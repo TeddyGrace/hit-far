@@ -174,14 +174,25 @@ def run_event_stage(db: Session, swing: Swing, pose: PoseData) -> None:
 
 
 def club_model(db: Session) -> Model:
+    """The stage-1 line tracker (always available as the fallback)."""
     return get_or_create_model(db, club_mod.MODEL_NAME, club_mod.MODEL_VERSION, TASK_CLUB,
                                notes="Label-free shaft-line tracker (stage 1): ridge search around the hands")
+
+
+def active_club_model(db: Session) -> Model:
+    """A trained (checkpointed) active club detector wins over the line tracker."""
+    line = club_model(db)
+    trained = db.scalar(
+        select(Model).where(Model.task == TASK_CLUB, Model.status == ModelStatus.active,
+                            Model.checkpoint_uri.is_not(None))
+        .order_by(Model.created_at.desc()).limit(1))
+    return trained or line
 
 
 def run_club_stage(db: Session, swing: Swing, video: Video, workdir: Path, pose: PoseData,
                    force: bool = False) -> ClubTrack | None:
     """Track the shaft. Never fails the swing: a tracker problem just means no club metrics."""
-    model = club_model(db)
+    model = active_club_model(db)
     existing = db.scalar(select(ClubTrack).where(ClubTrack.swing_id == swing.id, ClubTrack.model_id == model.id)
                          .order_by(ClubTrack.created_at.desc()).limit(1))
     if existing is not None and not force:
@@ -191,7 +202,18 @@ def run_club_stage(db: Session, swing: Swing, video: Video, workdir: Path, pose:
         if not proxy.exists():
             get_storage().download_file(video.proxy_uri, proxy)
         window = club_mod.window_from_events(effective_events(db, swing.id), pose.num_frames, pose.fps)
-        track = club_mod.track_shaft(proxy, pose, window)
+        track = None
+        if model.checkpoint_uri:
+            try:
+                from app.training.club_inference import track_shaft_learned
+
+                track = track_shaft_learned(model.checkpoint_uri, proxy, pose, window)
+            except Exception:
+                # Never lose club tracking to a model problem: fall back to the line tracker.
+                log.exception("learned club model %s failed; using the line tracker", model.version)
+                model = club_model(db)
+        if track is None:
+            track = club_mod.track_shaft(proxy, pose, window)
     except Exception:
         log.exception("club tracking failed for swing %s", swing.id)
         return None
@@ -204,23 +226,32 @@ def run_club_stage(db: Session, swing: Swing, video: Video, workdir: Path, pose:
     return row
 
 
-def latest_club_track(db: Session, swing_id: uuid.UUID) -> ClubTrack | None:
-    return db.scalar(select(ClubTrack).where(ClubTrack.swing_id == swing_id)
-                     .order_by(ClubTrack.created_at.desc()).limit(1))
+def latest_club_track(db: Session, swing_id: uuid.UUID, model_id: uuid.UUID | None = None) -> ClubTrack | None:
+    """The active club model's newest track for this swing (else the newest from any model)."""
+    q = select(ClubTrack).where(ClubTrack.swing_id == swing_id).order_by(ClubTrack.created_at.desc()).limit(1)
+    if model_id is None:
+        model_id = active_club_model(db).id
+    return db.scalar(q.where(ClubTrack.model_id == model_id)) or db.scalar(q)
 
 
-def club_corrections(db: Session, swing_id: uuid.UUID) -> dict[int, float]:
-    """Latest correction per frame (degrees); a null angle reverts to the tracker."""
+def club_labels(db: Session, swing_id: uuid.UUID) -> dict[int, dict]:
+    """Latest label per frame (the full stored value: angle_deg, optional clubhead_xy, confirmed);
+    a null angle reverts to the tracker."""
     rows = db.scalars(select(Label).where(Label.task == CLUB_LABEL_TASK, Label.target_type == "swing",
                                           Label.target_id == swing_id).order_by(Label.created_at)).all()
-    out: dict[int, float] = {}
+    out: dict[int, dict] = {}
     for r in rows:
         f = int(r.corrected_value["frame_index"])
         if r.corrected_value.get("angle_deg") is None:
             out.pop(f, None)
         else:
-            out[f] = float(r.corrected_value["angle_deg"])
+            out[f] = r.corrected_value
     return out
+
+
+def club_corrections(db: Session, swing_id: uuid.UUID) -> dict[int, float]:
+    """Your shaft direction per labelled frame (degrees): fixes and confirmations alike."""
+    return {f: float(v["angle_deg"]) for f, v in club_labels(db, swing_id).items()}
 
 
 def effective_club(db: Session, swing_id: uuid.UUID) -> club_mod.ShaftTrack | None:
@@ -246,8 +277,9 @@ def track_club(db: Session, swing_id: uuid.UUID, on_stage: Callable[[str], None]
 
 
 def swings_needing_club(db: Session) -> list[uuid.UUID]:
-    """Swings with pose but no track from the current tracker version."""
-    model = club_model(db)
+    """Swings with pose but no track from the active club model (a new tracker version or a newly
+    promoted detector)."""
+    model = active_club_model(db)
     db.commit()
     has_pose = select(PoseSequence.swing_id).distinct()
     tracked = select(ClubTrack.swing_id).where(ClubTrack.model_id == model.id).distinct()

@@ -211,12 +211,16 @@ These tables are already in the schema; the code for them is still to come.
 
 1. **Trained event model:** the first GolfDB run is queued automatically on deploy and promotes itself if it beats the rules.
 2. **Pose fine-tuning.** Fine-tune the keypoint model with a Label Studio round-trip for occluded and blurred frames (the top of the backswing, impact).
-3. **Club tracking.**
+3. **Club tracking.** The golfer's part: tag shot outcomes, and on a few swings per session check the shaft at the top, mid-downswing and impact.
    - **Stage 1 is built:** a label-free shaft-line tracker. The shaft is found as the strongest thin straight line leaving the hands, measured against a median background so static range clutter drops out, and smoothed over time with dynamic programming. It has a per-frame confidence that also falls when the shaft sweeps too far between frames.
      - Metrics come only from confident frames: shaft lean at address and impact, past-parallel at the top, wrist hinge at the top, lag at mid-downswing, and release speed at impact.
-     - To correct a frame, click **Fix shaft on this frame**, then click the clubhead. Corrections are saved as `labels` rows (`task=club`).
+     - To correct a frame, click **Fix shaft on this frame**, then click the clubhead. If the line shown is right, click **Shaft looks right**. Both are saved as `labels` rows (`task=club`); a fix also stores the clubhead point you clicked.
      - Record at **240 fps**. At low frame rates the shaft is a blur near impact, and those frames are flagged rather than guessed.
-   - **Stage 2 (next):** a learned grip-and-clubhead detector, trained on the tracker's confident frames plus your corrections.
+   - **Stage 2 is built, and switches on by itself once there's enough data:** a learned detector (`club-heatmap-cnn`), a small CNN on a crop around the hands that outputs grip and clubhead heatmaps.
+     - **Training data:** the line tracker's confident frames (the direction, plus the clubhead where the shaft's end isn't motion-blurred), and your shaft checks, which override the tracker on their frames.
+     - **Decoding:** the detector's per-direction scores go through the same temporal decoding as the tracker. Its confidence is the probability it puts on the chosen direction, and it also reports the clubhead position.
+     - **Data gate:** it trains on the `hit-far-trainer` service (`train_club` job) once there are at least 8 swings, and at least 20 checked frames on at least 2 held-out swings. Every 3rd swing you've checked is held out. The job is queued automatically when the gate opens, and again after every `CLUB_RETRAIN_EVERY` (default 25) new checks or a large batch of new swings. The Models page shows progress toward the gate and has a manual **Train club detector** button.
+     - **Promotion:** it goes live only if, on the held-out swings, it has a lower median error than the tracker on the frames you fixed, at least as many of your checked frames within 10°, agreement with the tracker where the tracker was confident, and no worse results than the detector already active. Then every swing is re-tracked. If the detector fails at runtime, tracking falls back to the line tracker.
    - **Stage 3:** clubhead and face orientation. A shaft line seen face-on can't show the face rotating, which is the real hook signal.
 4. **Dual-camera calibration sessions.** Sync two cameras by clap or flash, then triangulate. Use the triangulated poses to fine-tune the monocular lifter and to fill `pose_3d_sequences.error_estimate`.
 5. **Reference profiles and comparison.** Compare against archetypes or your own reference swings, with DTW event alignment and per-metric deltas.

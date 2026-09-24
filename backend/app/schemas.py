@@ -209,11 +209,18 @@ class ClubFrames(BaseModel):
     angle_deg: list[float | None]  # image plane, grip -> clubhead, 0 = +x (right), 90 = +y (down)
     confidence: list[float]
     grip: list[list[float] | None]
-    corrected: list[int]
+    corrected: list[int]  # frames you labelled (fixed or confirmed)
+    confirmed: list[int] = []  # of those, the ones you confirmed as right
+    # Clubhead per frame (pixels) where the tracker finds it (learned detector only).
+    clubhead: list[list[float] | None] | None = None
+    model_name: str | None = None
+    model_version: str | None = None
 
 
 class ClubCorrectionIn(BaseModel):
-    angle_deg: float | None
+    angle_deg: float | None = None  # null (without confirm) reverts that frame to the tracker
+    clubhead_xy: tuple[float, float] | None = None  # where you clicked the clubhead (pixels)
+    confirm: bool = False  # "the shaft shown on this frame is right"
 
 
 # --- Diagnosis ---------------------------------------------------------------------------------

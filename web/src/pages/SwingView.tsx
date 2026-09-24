@@ -37,11 +37,11 @@ export default function SwingView() {
   }, [id]);
 
   const setShaft = useCallback(
-    async (f: number, angle: number | null) => {
+    async (f: number, angle: number | null, clubhead: [number, number] | null = null, confirm = false) => {
       if (!id) return;
       setSaving(true);
       try {
-        setSwing(await api.correctClub(id, f, angle));
+        setSwing(await (confirm ? api.confirmClub(id, f) : api.correctClub(id, f, angle, clubhead)));
         setClub(await api.getClub(id));
       } catch (e) {
         setError((e as Error).message);
@@ -176,7 +176,7 @@ export default function SwingView() {
                 picking && club?.grip[frame]
                   ? (x, y) => {
                       const g = club.grip[frame]!;
-                      setShaft(frame, (Math.atan2(y - g[1], x - g[0]) * 180) / Math.PI);
+                      setShaft(frame, (Math.atan2(y - g[1], x - g[0]) * 180) / Math.PI, [x, y]);
                     }
                   : null
               }
@@ -228,14 +228,22 @@ export default function SwingView() {
                 Shaft{" "}
                 {club.angle_deg[frame] == null
                   ? "not tracked on this frame"
-                  : club.corrected.includes(frame)
-                    ? "set by you"
-                    : `confidence ${(club.confidence[frame] ?? 0).toFixed(2)}${(club.confidence[frame] ?? 0) < 0.5 ? " (not used for metrics)" : ""}`}
+                  : club.confirmed.includes(frame)
+                    ? "checked by you"
+                    : club.corrected.includes(frame)
+                      ? "set by you"
+                      : `confidence ${(club.confidence[frame] ?? 0).toFixed(2)}${(club.confidence[frame] ?? 0) < 0.5 ? " (not used for metrics)" : ""}`}
               </span>
               <button className={`small ${picking ? "on" : ""}`} disabled={!club.grip[frame] || saving}
                 onClick={() => setPicking((p) => !p)}>
                 {picking ? "Click the clubhead…" : "Fix shaft on this frame"}
               </button>
+              {club.angle_deg[frame] != null && !club.corrected.includes(frame) && !picking && (
+                <button className="small" disabled={saving} onClick={() => setShaft(frame, null, null, true)}
+                  title="The shaft line shown on this frame is right. Checked frames train the club detector.">
+                  Shaft looks right
+                </button>
+              )}
               {club.corrected.includes(frame) && (
                 <button className="link small" onClick={() => setShaft(frame, null)}>revert</button>
               )}

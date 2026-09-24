@@ -13,6 +13,18 @@ from app.pipeline.run import swings_needing_club, swings_needing_metrics
 log = logging.getLogger(__name__)
 
 
+def queue_club_retrack(db: Session) -> int:
+    """Queue `track_club` for every swing without a track from the active club model (one job per
+    swing; the last one retrains the outcome models with the new club metrics)."""
+    pending = set(db.scalars(select(Job.subject_id).where(
+        Job.type == jobs.JOB_TRACK_CLUB, Job.status.in_([JobStatus.queued, JobStatus.running]))).all())
+    todo = [s for s in swings_needing_club(db) if s not in pending]
+    for n, sid in enumerate(todo, 1):
+        jobs.enqueue(db, jobs.JOB_TRACK_CLUB, {"swing_id": str(sid), "retrain_after": n == len(todo)},
+                     subject_id=sid)
+    return len(todo)
+
+
 def queue_startup_jobs(db: Session) -> list[str]:
     queued = []
     # A metric formula change (PIPELINE_VERSION bump) leaves existing swings without current
@@ -20,15 +32,17 @@ def queue_startup_jobs(db: Session) -> list[str]:
     if swings_needing_metrics(db) and jobs.enqueue_once(db, jobs.JOB_RECOMPUTE_METRICS, {}):
         queued.append(jobs.JOB_RECOMPUTE_METRICS)
     # Club tracking for swings processed before the tracker existed (or before a tracker version
-    # bump). One job per swing; the last one retrains the outcome models with the club metrics.
-    pending = set(db.scalars(select(Job.subject_id).where(
-        Job.type == jobs.JOB_TRACK_CLUB, Job.status.in_([JobStatus.queued, JobStatus.running]))).all())
-    todo = [s for s in swings_needing_club(db) if s not in pending]
-    for n, sid in enumerate(todo, 1):
-        jobs.enqueue(db, jobs.JOB_TRACK_CLUB, {"swing_id": str(sid), "retrain_after": n == len(todo)},
-                     subject_id=sid)
-    if todo:
-        queued.append(f"{jobs.JOB_TRACK_CLUB} x{len(todo)}")
+    # bump, or a newly promoted club detector).
+    n = queue_club_retrack(db)
+    if n:
+        queued.append(f"{jobs.JOB_TRACK_CLUB} x{n}")
+    # Club detector (stage 2): train once its data gate is met and there's new data.
+    from app.training.train_club import queue_training, should_train
+
+    ok, st = should_train(db)
+    if ok:
+        queue_training(db, st)
+        queued.append(jobs.JOB_TRAIN_CLUB)
     # First event-model training: once, if nothing trained exists and no run was ever attempted
     # (a failed run is not retried automatically; start it again from the Models page).
     trained = db.scalar(select(Model.id).where(Model.task == TASK_EVENTS, Model.checkpoint_uri.is_not(None)).limit(1))

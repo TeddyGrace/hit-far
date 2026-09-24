@@ -1,7 +1,78 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, EvalResult, ModelInfo, TrainingJob } from "../api";
+import { api, ClubTrainingStatus, EvalResult, ModelInfo, TrainingJob } from "../api";
 
 const pct = (r?: EvalResult) => (r && r.pce != null ? `${(r.pce * 100).toFixed(1)}%` : "—");
+
+interface ClubHuman {
+  n: number;
+  median_err_deg?: number;
+  within_10?: number;
+}
+interface ClubEval {
+  human: ClubHuman;
+  fixes?: ClubHuman;
+  agreement: { n: number; median_diff_deg: number | null };
+  coverage: number | null;
+}
+
+const pct10 = (h?: ClubHuman) => (h && h.n ? `${((h.within_10 ?? 0) * 100).toFixed(0)}%` : "—");
+const clubErr = (h?: ClubHuman) =>
+  h && h.n ? `${h.median_err_deg?.toFixed(1)}° median, ${((h.within_10 ?? 0) * 100).toFixed(0)}% within 10°` : "—";
+
+function ClubEvalSummary({ em }: { em: Record<string, unknown> }) {
+  const learned = em.learned as ClubEval | undefined;
+  const line = em.line as ClubEval | undefined;
+  const current = em.current as ClubEval | undefined;
+  if (!learned || !line) return <span className="muted small">{JSON.stringify(em)}</span>;
+  return (
+    <div className="small">
+      <div>
+        Where you fixed the shaft (n={learned.fixes?.n ?? 0}): <strong>{clubErr(learned.fixes)}</strong> vs line tracker{" "}
+        {clubErr(line.fixes)}
+      </div>
+      <div>
+        All your held-out checks (n={learned.human.n}): {pct10(learned.human)} within 10° vs {pct10(line.human)}
+        {current && current.human.n > 0 && <> · previous detector {pct10(current.human)}, fixes {clubErr(current.fixes)}</>}
+      </div>
+      <div className="muted">
+        agrees with the line tracker's confident frames to {learned.agreement.median_diff_deg ?? "—"}° (median) ·
+        confident on {learned.coverage != null ? `${(learned.coverage * 100).toFixed(0)}%` : "—"} of frames vs{" "}
+        {line.coverage != null ? `${(line.coverage * 100).toFixed(0)}%` : "—"} · trained on {String(em.n_train_swings)}{" "}
+        swings ({String(em.n_train_pseudo)} tracker frames, {String(em.n_train_human)} of your checks)
+        {em.auto_promoted ? " → promoted" : ""}
+      </div>
+    </div>
+  );
+}
+
+function RunsTable({ runs }: { runs: TrainingJob[] }) {
+  if (!runs.length) return null;
+  return (
+    <table className="table">
+      <tbody>
+        {runs.slice(0, 5).map((r) => (
+          <tr key={r.id}>
+            <td className="small">{new Date(r.updated_at).toLocaleString()}</td>
+            <td>
+              <span className={`chip ${r.status === "done" ? "ok" : r.status === "failed" ? "bad" : "busy"}`}>
+                {r.status}
+              </span>
+            </td>
+            <td className="small">
+              {r.stage}
+              {r.error && (
+                <details className="error-details">
+                  <summary className="error">error</summary>
+                  <pre>{r.error}</pre>
+                </details>
+              )}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
 
 function EvalSummary({ m }: { m: ModelInfo }) {
   const em = m.eval_metrics as Record<string, EvalResult & number> | null;
@@ -24,6 +95,7 @@ function EvalSummary({ m }: { m: ModelInfo }) {
       </div>
     );
   }
+  if (m.task === "club_tracking") return <ClubEvalSummary em={em} />;
   if (!("golfdb_test" in em)) return <span className="muted small">{JSON.stringify(em)}</span>;
   const test = em.golfdb_test as EvalResult;
   const face = em.golfdb_test_face_on as EvalResult;
@@ -63,6 +135,7 @@ export default function Models() {
   const [models, setModels] = useState<ModelInfo[] | null>(null);
   const [runs, setRuns] = useState<TrainingJob[]>([]);
   const [reviewed, setReviewed] = useState<number | null>(null);
+  const [clubStatus, setClubStatus] = useState<ClubTrainingStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
 
@@ -70,10 +143,16 @@ export default function Models() {
     api.listModels().then(setModels, (e) => setError(e.message));
     api.trainingJobs().then(setRuns, () => {});
     api.trainingStatus().then((s) => setReviewed(s.reviewed_swings), () => {});
+    api.clubTrainingStatus().then(setClubStatus, () => {});
   }, []);
   useEffect(load, [load]);
 
-  const running = runs.find((r) => r.status === "queued" || r.status === "running");
+  const isLive = (r: TrainingJob) => r.status === "queued" || r.status === "running";
+  const eventRuns = runs.filter((r) => r.type === "train_events");
+  const clubRuns = runs.filter((r) => r.type === "train_club");
+  const eventRunning = eventRuns.find(isLive);
+  const clubRunning = clubRuns.find(isLive);
+  const running = eventRunning ?? clubRunning;
   useEffect(() => {
     if (!running) return;
     const t = setInterval(load, 5000);
@@ -109,10 +188,10 @@ export default function Models() {
         <div className="controls">
           <button
             type="submit"
-            disabled={!!running}
+            disabled={!!eventRunning}
             onClick={() => act(() => api.startEventTraining(), "Training queued")}
           >
-            {running ? "Training in progress…" : "Train event model"}
+            {eventRunning ? "Training in progress…" : "Train event model"}
           </button>
           <button onClick={() => act(async () => {
             const r = await api.redetectAll();
@@ -121,31 +200,40 @@ export default function Models() {
             Re-run events on all swings
           </button>
         </div>
-        {runs.length > 0 && (
-          <table className="table">
-            <tbody>
-              {runs.slice(0, 5).map((r) => (
-                <tr key={r.id}>
-                  <td className="small">{new Date(r.updated_at).toLocaleString()}</td>
-                  <td>
-                    <span className={`chip ${r.status === "done" ? "ok" : r.status === "failed" ? "bad" : "busy"}`}>
-                      {r.status}
-                    </span>
-                  </td>
-                  <td className="small">
-                    {r.stage}
-                    {r.error && (
-                      <details className="error-details">
-                        <summary className="error">error</summary>
-                        <pre>{r.error}</pre>
-                      </details>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <RunsTable runs={eventRuns} />
+      </section>
+
+      <section className="card">
+        <h2>Club detector</h2>
+        <p className="small muted">
+          Learns to find the shaft and clubhead from the line tracker's confident frames plus your shaft checks on the
+          swing page ("Fix shaft on this frame" or "Shaft looks right"). It trains by itself on the{" "}
+          <code>hit-far-trainer</code> service once there is enough data, and again as you add more. It replaces the line
+          tracker only if it is more accurate on swings it never trained on, and then every swing is re-tracked with it.
+        </p>
+        {clubStatus && (
+          <p className="small">
+            {clubStatus.swings} swings · {clubStatus.labelled_frames} checked frames on {clubStatus.labelled_swings}{" "}
+            swings ({clubStatus.test_frames} of them on {clubStatus.test_swings} held-out swings).{" "}
+            {clubStatus.ready ? (
+              <strong>Enough data to train.</strong>
+            ) : (
+              <span className="muted">
+                Needs {clubStatus.needs.join(", ")}. Checking the shaft at the top, mid-downswing and impact on a few
+                swings per session is plenty.
+              </span>
+            )}
+          </p>
         )}
+        <div className="controls">
+          <button
+            disabled={!!clubRunning || !clubStatus?.ready}
+            onClick={() => act(() => api.startClubTraining(), "Club detector training queued")}
+          >
+            {clubRunning ? "Training in progress…" : "Train club detector"}
+          </button>
+        </div>
+        <RunsTable runs={clubRuns} />
       </section>
 
       <p className="muted small">
@@ -191,6 +279,22 @@ export default function Models() {
                           !confirm(`This model scores ${(mine * 100).toFixed(1)}% vs the rules' ${(rules * 100).toFixed(1)}% on held-out face-on swings. Promote anyway?`))
                           return;
                         act(() => api.promoteModel(m.id), `${m.name} ${m.version} is now the active event model`);
+                      }}
+                    >
+                      Promote
+                    </button>
+                  )}
+                  {m.status !== "active" && m.task === "club_tracking" && (
+                    <button
+                      className="link"
+                      onClick={() => {
+                        const em = m.eval_metrics as Record<string, ClubEval> | null;
+                        const mine = em?.learned?.fixes?.median_err_deg;
+                        const line = em?.line?.fixes?.median_err_deg;
+                        if (mine != null && line != null && mine > line &&
+                          !confirm(`This detector is off by ${mine.toFixed(1)}° (median) vs the line tracker's ${line.toFixed(1)}° on the frames you fixed. Promote anyway?`))
+                          return;
+                        act(() => api.promoteModel(m.id), `${m.name} ${m.version} is now the active club tracker; re-tracking every swing`);
                       }}
                     >
                       Promote

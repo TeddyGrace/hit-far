@@ -136,7 +136,24 @@ export interface ClubFrames {
   angle_deg: (number | null)[];
   confidence: number[];
   grip: ([number, number] | null)[];
-  corrected: number[];
+  corrected: number[]; // frames you labelled (fixed or confirmed)
+  confirmed: number[]; // of those, the ones you confirmed as right
+  clubhead: ([number, number] | null)[] | null; // learned detector only
+  model_name: string | null;
+  model_version: string | null;
+}
+
+export interface ClubTrainingStatus {
+  swings: number;
+  labelled_swings: number;
+  labelled_frames: number;
+  test_swings: number;
+  test_frames: number;
+  ready: boolean;
+  min_swings: number;
+  min_test_swings: number;
+  min_test_frames: number;
+  needs: string[];
 }
 
 export type Verdict = "confirmed" | "rejected" | "unsure";
@@ -382,14 +399,18 @@ export const api = {
     request<SwingDetail>("PUT", `/api/swings/${id}/events/${event}`, { frame_index }),
 
   getClub: (id: string) => request<ClubFrames>("GET", `/api/swings/${id}/club`),
-  correctClub: (id: string, frame: number, angle_deg: number | null) =>
-    request<SwingDetail>("PUT", `/api/swings/${id}/club/${frame}`, { angle_deg }),
+  correctClub: (id: string, frame: number, angle_deg: number | null, clubhead_xy: [number, number] | null = null) =>
+    request<SwingDetail>("PUT", `/api/swings/${id}/club/${frame}`, { angle_deg, clubhead_xy }),
+  confirmClub: (id: string, frame: number) =>
+    request<SwingDetail>("PUT", `/api/swings/${id}/club/${frame}`, { confirm: true }),
 
   listModels: () => request<ModelInfo[]>("GET", "/api/models"),
 
   startEventTraining: (epochs = 40) => request<TrainingJob>("POST", "/api/training/events", { epochs }),
   trainingJobs: () => request<TrainingJob[]>("GET", "/api/training/jobs"),
   trainingStatus: () => request<{ reviewed_swings: number }>("GET", "/api/training/status"),
+  clubTrainingStatus: () => request<ClubTrainingStatus>("GET", "/api/training/club/status"),
+  startClubTraining: () => request<TrainingJob>("POST", "/api/training/club"),
   promoteModel: (id: string) => request<ModelInfo[]>("POST", `/api/models/${id}/promote`),
   redetectAll: () => request<{ queued: number }>("POST", "/api/swings/redetect-events"),
   setReviewed: (swingId: string, reviewed: boolean) =>
