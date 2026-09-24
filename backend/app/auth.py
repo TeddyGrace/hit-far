@@ -1,12 +1,14 @@
 """Multi-user auth: username + password (scrypt-hashed) -> signed, httpOnly session cookie.
 
-Users are managed from the command line (`python -m app.users`); there is no sign-up endpoint.
+There is no sign-up: an admin adds users on the web app's Users page (`app/routers/users.py`) or
+with `python -m app.users` from a shell. The first user (the owner) is an admin.
 """
 
 import base64
 import hashlib
 import hmac
 import logging
+import re
 import secrets
 import time
 import uuid
@@ -28,6 +30,27 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 # scrypt at n=2^14, r=8 (16 MiB, ~50 ms): stdlib only, no extra dependency.
 _N, _R, _P = 2**14, 8, 1
+
+MIN_PASSWORD = 8
+_USERNAME_RE = re.compile(r"[a-z0-9][a-z0-9._-]{0,49}")
+
+
+def normalize_username(name: str) -> str:
+    """Usernames are case-insensitive: stored lower-case and trimmed."""
+    return name.strip().lower()
+
+
+def username_problem(name: str) -> str | None:
+    """Why a (normalized) username can't be used, or None if it's fine."""
+    if not _USERNAME_RE.fullmatch(name):
+        return "username must be 1-50 characters: letters, digits, '.', '_' or '-'"
+    return None
+
+
+def password_problem(password: str) -> str | None:
+    if len(password) < MIN_PASSWORD:
+        return f"password must be at least {MIN_PASSWORD} characters"
+    return None
 
 
 def hash_password(password: str) -> str:
@@ -78,15 +101,25 @@ def current_user(request: Request, db: Session = Depends(get_db), s: Settings = 
 require_auth = current_user
 
 
+def require_admin(user: User = Depends(current_user)) -> User:
+    if not user.is_admin:
+        raise HTTPException(403, "only an admin can manage users")
+    return user
+
+
 def bootstrap_users(db: Session, s: Settings) -> None:
-    """On API start: with no users yet, create the owner from APP_PASSWORD (so the existing login
-    keeps working), then give any rows from before users existed to the first user."""
+    """On API start: with no users yet, create the owner (an admin) from APP_PASSWORD so the existing
+    login keeps working; make sure someone is an admin; then give any rows from before users existed
+    to the first user."""
     first = db.scalar(select(User).order_by(User.created_at).limit(1))
     if first is None:
-        first = User(username=s.owner_username.strip().lower(), password_hash=hash_password(s.app_password))
+        first = User(username=normalize_username(s.owner_username), password_hash=hash_password(s.app_password),
+                     is_admin=True)
         db.add(first)
         db.flush()
         log.info("created user %r from APP_PASSWORD", first.username)
+    elif db.scalar(select(User.id).where(User.is_admin).limit(1)) is None:
+        first.is_admin = True  # nobody could manage users otherwise
     db.execute(update(RecordingSession).where(RecordingSession.user_id.is_(None)).values(user_id=first.id))
     db.execute(update(Dataset).where(Dataset.user_id.is_(None), Dataset.task == "outcome").values(user_id=first.id))
     db.execute(update(Model).where(Model.user_id.is_(None), Model.task.startswith("outcome_"))
@@ -102,7 +135,7 @@ class LoginIn(BaseModel):
 @router.post("/login")
 def login(body: LoginIn, response: Response, db: Session = Depends(get_db),
           s: Settings = Depends(get_settings)) -> dict:
-    user = db.scalar(select(User).where(User.username == body.username.strip().lower()))
+    user = db.scalar(select(User).where(User.username == normalize_username(body.username)))
     ok = verify_password(body.password, user.password_hash if user else _DUMMY_HASH)
     if user is None or not ok:
         time.sleep(1.0)  # blunt brute-force damping; a handful of users, so latency is fine
@@ -111,7 +144,7 @@ def login(body: LoginIn, response: Response, db: Session = Depends(get_db),
         COOKIE_NAME, _signer(s).dumps({"uid": str(user.id)}), max_age=s.session_max_age_s,
         httponly=True, secure=s.cookie_secure, samesite="lax", path="/",
     )
-    return {"ok": True, "username": user.username}
+    return {"ok": True, "username": user.username, "is_admin": user.is_admin}
 
 
 @router.post("/logout")
@@ -122,4 +155,4 @@ def logout(response: Response) -> dict:
 
 @router.get("/me")
 def me(user: User = Depends(current_user)) -> dict:
-    return {"ok": True, "username": user.username}
+    return {"ok": True, "username": user.username, "is_admin": user.is_admin}

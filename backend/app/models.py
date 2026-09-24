@@ -110,6 +110,8 @@ class User(Base):
     id: Mapped[uuid.UUID] = _pk()
     username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(200), nullable=False)
+    # Admins can add, reset and remove users from the web app (Users page).
+    is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     created_at: Mapped[datetime] = _created()
 
 

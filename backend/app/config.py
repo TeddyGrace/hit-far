@@ -11,9 +11,9 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+psycopg://postgres@localhost:5432/hitfar"
 
-    # Auth: users log in with username + password (manage them with `python -m app.users`). On the
-    # first start with no users, an OWNER_USERNAME user is created with APP_PASSWORD and given all
-    # existing data; after that APP_PASSWORD is not used.
+    # Auth: users log in with username + password. On the first start with no users, an admin
+    # OWNER_USERNAME user is created with APP_PASSWORD and given all existing data; after that
+    # APP_PASSWORD is not used. Admins add users on the web app's Users page (or `python -m app.users`).
     app_password: str = "changeme"
     owner_username: str = "owner"
     secret_key: str = "dev-secret-change-me"

@@ -1,7 +1,7 @@
-"""Manage users from the command line (there is no sign-up page).
+"""Manage users from the command line. (Admins can also do this on the web app's Users page.)
 
     python -m app.users list
-    python -m app.users add NAME        # prompts for the password
+    python -m app.users add NAME        # prompts for the password; --admin to make them an admin
     python -m app.users passwd NAME
     python -m app.users delete NAME     # refused while the user still owns sessions
 
@@ -14,11 +14,9 @@ import sys
 
 from sqlalchemy import func, select
 
-from app.auth import hash_password
+from app.auth import hash_password, normalize_username, password_problem, username_problem
 from app.db import get_sessionmaker
 from app.models import RecordingSession, User
-
-MIN_PASSWORD = 8
 
 
 def _password(from_stdin: bool) -> str:
@@ -28,8 +26,8 @@ def _password(from_stdin: bool) -> str:
         pw = getpass.getpass("password: ")
         if getpass.getpass("again: ") != pw:
             sys.exit("passwords don't match")
-    if len(pw) < MIN_PASSWORD:
-        sys.exit(f"password must be at least {MIN_PASSWORD} characters")
+    if problem := password_problem(pw):
+        sys.exit(problem)
     return pw
 
 
@@ -38,8 +36,9 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("command", choices=["list", "add", "passwd", "delete"])
     ap.add_argument("username", nargs="?")
     ap.add_argument("--password-stdin", action="store_true")
+    ap.add_argument("--admin", action="store_true", help="with add: the new user can manage users")
     a = ap.parse_args(argv)
-    name = (a.username or "").strip().lower()
+    name = normalize_username(a.username or "")
     if a.command != "list" and not name:
         ap.error(f"{a.command} needs a username")
 
@@ -47,13 +46,16 @@ def main(argv: list[str] | None = None) -> None:
         if a.command == "list":
             n = select(func.count(RecordingSession.id)).where(RecordingSession.user_id == User.id).scalar_subquery()
             for u, sessions in db.execute(select(User, n).order_by(User.created_at)).all():
-                print(f"{u.username}\t{sessions} sessions\tcreated {u.created_at:%Y-%m-%d}")
+                admin = "\tadmin" if u.is_admin else ""
+                print(f"{u.username}\t{sessions} sessions\tcreated {u.created_at:%Y-%m-%d}{admin}")
             return
         user = db.scalar(select(User).where(User.username == name))
         if a.command == "add":
+            if problem := username_problem(name):
+                sys.exit(problem)
             if user is not None:
                 sys.exit(f"user {name!r} already exists")
-            db.add(User(username=name, password_hash=hash_password(_password(a.password_stdin))))
+            db.add(User(username=name, password_hash=hash_password(_password(a.password_stdin)), is_admin=a.admin))
         elif user is None:
             sys.exit(f"no user {name!r}")
         elif a.command == "passwd":

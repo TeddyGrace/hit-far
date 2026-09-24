@@ -125,3 +125,34 @@ def test_outcome_models_are_per_user(authed, fast_cv, monkeypatch):  # noqa: F81
         owner_id = db.scalar(select(User.id).where(User.username == "owner"))
         active = db.scalars(select(Model).where(Model.task == "outcome_slice", Model.status == "active")).all()
         assert [m.user_id for m in active] == [owner_id]  # bob's 5 tags train nothing; owner's model untouched
+
+
+def test_admin_manages_users_from_the_web(authed, monkeypatch):
+    assert authed.get("/api/auth/me").json()["is_admin"] is True  # the owner is the admin
+    owner_id = next(u["id"] for u in authed.get("/api/users").json() if u["username"] == "owner")
+
+    r = authed.post("/api/users", json={"username": " Dana ", "password": "dana-password"})
+    assert r.status_code == 201 and r.json()["username"] == "dana" and r.json()["is_admin"] is False
+    dana_id = r.json()["id"]
+    assert authed.post("/api/users", json={"username": "dana", "password": "whatever-pw"}).status_code == 409
+    assert authed.post("/api/users", json={"username": "erin", "password": "short"}).status_code == 422
+    assert authed.post("/api/users", json={"username": "no spaces", "password": "long-enough"}).status_code == 422
+    assert [u["username"] for u in authed.get("/api/users").json()] == ["owner", "dana"]
+
+    assert authed.patch(f"/api/users/{dana_id}", json={"password": "dana-new-pw"}).status_code == 200
+    assert authed.patch(f"/api/users/{owner_id}", json={"is_admin": False}).status_code == 409
+    assert authed.delete(f"/api/users/{owner_id}").status_code == 409
+
+    # Non-admins can't manage users.
+    assert _login(authed, "dana", "dana-password").status_code == 401
+    assert _login(authed, "dana", "dana-new-pw").json()["is_admin"] is False
+    assert authed.get("/api/users").status_code == 403
+    assert authed.post("/api/users", json={"username": "mallory", "password": "mallory-pw"}).status_code == 403
+    authed.post("/api/sessions", json={"location": "dana's range"})
+
+    _login(authed, "owner", "test-pw")
+    assert authed.delete(f"/api/users/{dana_id}").status_code == 409  # still owns a session
+    r = authed.post("/api/users", json={"username": "frank", "password": "frank-password", "is_admin": True})
+    assert r.json()["is_admin"] is True
+    assert authed.delete(f"/api/users/{r.json()['id']}").status_code == 204
+    assert _login(authed, "frank", "frank-password").status_code == 401

@@ -1,7 +1,7 @@
 import { FormEvent, useState } from "react";
-import { api } from "../api";
+import { api, Me } from "../api";
 
-export default function Login({ onLogin }: { onLogin: () => void }) {
+export default function Login({ onLogin }: { onLogin: (me: Me) => void }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -12,8 +12,7 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      await api.login(username, password);
-      onLogin();
+      onLogin(await api.login(username, password));
     } catch (err) {
       setError((err as Error).message);
     } finally {

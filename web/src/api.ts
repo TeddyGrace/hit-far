@@ -300,6 +300,19 @@ export interface Prediction {
   what_if: WhatIf[];
 }
 
+export interface Me {
+  ok: boolean;
+  username: string;
+  is_admin: boolean;
+}
+export interface UserInfo {
+  id: string;
+  username: string;
+  is_admin: boolean;
+  created_at: string;
+  num_sessions: number;
+}
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -334,9 +347,16 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
 export const api = {
   login: (username: string, password: string) =>
-    request<{ ok: boolean; username: string }>("POST", "/api/auth/login", { username, password }),
+    request<Me>("POST", "/api/auth/login", { username, password }),
   logout: () => request<{ ok: boolean }>("POST", "/api/auth/logout"),
-  me: () => request<{ ok: boolean; username: string }>("GET", "/api/auth/me"),
+  me: () => request<Me>("GET", "/api/auth/me"),
+
+  listUsers: () => request<UserInfo[]>("GET", "/api/users"),
+  createUser: (body: { username: string; password: string; is_admin: boolean }) =>
+    request<UserInfo>("POST", "/api/users", body),
+  updateUser: (id: string, body: { password?: string; is_admin?: boolean }) =>
+    request<UserInfo>("PATCH", `/api/users/${id}`, body),
+  deleteUser: (id: string) => request<void>("DELETE", `/api/users/${id}`),
 
   listSessions: () => request<SessionSummary[]>("GET", "/api/sessions"),
   createSession: (body: Partial<Pick<Session, "recorded_at" | "location" | "club_used" | "notes">>) =>

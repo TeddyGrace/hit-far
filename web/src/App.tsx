@@ -1,27 +1,26 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink, Route, Routes, useNavigate } from "react-router-dom";
-import { api, setUnauthorizedHandler } from "./api";
+import { api, Me, setUnauthorizedHandler } from "./api";
 import Analysis from "./pages/Analysis";
 import Login from "./pages/Login";
 import Models from "./pages/Models";
 import SessionDetail from "./pages/SessionDetail";
 import Sessions from "./pages/Sessions";
 import SwingView from "./pages/SwingView";
+import Users from "./pages/Users";
 
 export default function App() {
-  const [authed, setAuthed] = useState<boolean | null>(null);
+  // undefined while checking the session cookie, null when logged out.
+  const [me, setMe] = useState<Me | null | undefined>(undefined);
   const navigate = useNavigate();
 
   useEffect(() => {
-    setUnauthorizedHandler(() => setAuthed(false));
-    api.me().then(
-      () => setAuthed(true),
-      () => setAuthed(false),
-    );
+    setUnauthorizedHandler(() => setMe(null));
+    api.me().then(setMe, () => setMe(null));
   }, []);
 
-  if (authed === null) return <div className="page muted">Loading…</div>;
-  if (!authed) return <Login onLogin={() => setAuthed(true)} />;
+  if (me === undefined) return <div className="page muted">Loading…</div>;
+  if (me === null) return <Login onLogin={setMe} />;
 
   return (
     <>
@@ -35,12 +34,14 @@ export default function App() {
           </NavLink>
           <NavLink to="/analysis">Analysis</NavLink>
           <NavLink to="/models">Models</NavLink>
+          {me.is_admin && <NavLink to="/users">Users</NavLink>}
         </nav>
+        <span className="muted small">{me.username}</span>
         <button
           className="link"
           onClick={async () => {
             await api.logout();
-            setAuthed(false);
+            setMe(null);
             navigate("/");
           }}
         >
@@ -54,6 +55,7 @@ export default function App() {
           <Route path="/swings/:id" element={<SwingView />} />
           <Route path="/analysis" element={<Analysis />} />
           <Route path="/models" element={<Models />} />
+          {me.is_admin && <Route path="/users" element={<Users me={me} />} />}
           <Route path="*" element={<p>Not found.</p>} />
         </Routes>
       </main>

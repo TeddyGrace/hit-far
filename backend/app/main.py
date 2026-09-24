@@ -15,6 +15,7 @@ from app.routers import (
     sessions,
     swings,
     training,
+    users,
     videos,
 )
 from app.storage import S3Storage, get_storage
@@ -78,6 +79,7 @@ app.include_router(models_registry.router)
 app.include_router(diagnoses.router)
 app.include_router(training.router)
 app.include_router(outcomes.router)
+app.include_router(users.router)
 app.include_router(local_storage.router)
 
 
