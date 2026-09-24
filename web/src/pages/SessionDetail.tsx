@@ -32,11 +32,50 @@ export default function SessionDetail() {
   const fileInput = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
+  const [name, setName] = useState("");
+  const [location, setLocation] = useState("");
+  const [club, setClub] = useState("");
+  const [notes, setNotes] = useState("");
+  const [saving, setSaving] = useState(false);
+
   const load = useCallback(() => {
     if (id) api.getSession(id).then(setSession, (e) => setError(e.message));
   }, [id]);
 
   useEffect(load, [load]);
+
+  useEffect(() => {
+    if (!session) return;
+    setName(session.name ?? "");
+    setLocation(session.location ?? "");
+    setClub(session.club_used ?? "");
+    setNotes(session.notes ?? "");
+  }, [session]);
+
+  const dirty =
+    !!session &&
+    (name !== (session.name ?? "") ||
+      location !== (session.location ?? "") ||
+      club !== (session.club_used ?? "") ||
+      notes !== (session.notes ?? ""));
+
+  async function saveDetails() {
+    if (!session) return;
+    setSaving(true);
+    try {
+      const updated = await api.updateSession(session.id, {
+        name: name || null,
+        location: location || null,
+        club_used: club || null,
+        notes: notes || null,
+      });
+      setSession({ ...session, ...updated });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   // Poll while anything is in flight.
   const busy = session?.videos.some((v) => v.job && (v.job.status === "queued" || v.job.status === "running"));
@@ -84,12 +123,32 @@ export default function SessionDetail() {
         <Link to="/">← Sessions</Link>
       </p>
       <h1>
-        {new Date(session.recorded_at).toLocaleDateString()}
-        {session.location && <span className="muted"> · {session.location}</span>}
-        {session.club_used && <span className="muted"> · {session.club_used}</span>}
+        {session.name || new Date(session.recorded_at).toLocaleDateString()}
+        {session.name && <span className="muted"> · {new Date(session.recorded_at).toLocaleDateString()}</span>}
       </h1>
-      {session.notes && <p>{session.notes}</p>}
       {error && <p className="error">{error}</p>}
+
+      <div className="card row-form">
+        <label>
+          Name
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Tuesday range" />
+        </label>
+        <label>
+          Location
+          <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Range, sim, course…" />
+        </label>
+        <label>
+          Club
+          <input value={club} onChange={(e) => setClub(e.target.value)} placeholder="7i" />
+        </label>
+        <label className="grow">
+          Notes
+          <input value={notes} onChange={(e) => setNotes(e.target.value)} />
+        </label>
+        <button onClick={saveDetails} disabled={!dirty || saving}>
+          {saving ? "Saving…" : "Save"}
+        </button>
+      </div>
 
       <div className="card row-form">
         <label>

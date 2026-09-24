@@ -12,6 +12,7 @@ export default function Sessions() {
   const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [date, setDate] = useState(todayLocal());
+  const [name, setName] = useState("");
   const [location, setLocation] = useState("");
   const [club, setClub] = useState("");
   const [notes, setNotes] = useState("");
@@ -26,6 +27,7 @@ export default function Sessions() {
     try {
       const s = await api.createSession({
         recorded_at: new Date(`${date}T12:00:00`).toISOString(),
+        name: name || null,
         location: location || null,
         club_used: club || null,
         notes: notes || null,
@@ -44,6 +46,10 @@ export default function Sessions() {
         <label>
           Date
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
+        </label>
+        <label>
+          Name
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Tuesday range" />
         </label>
         <label>
           Location
@@ -69,6 +75,7 @@ export default function Sessions() {
           <thead>
             <tr>
               <th>Date</th>
+              <th>Name</th>
               <th>Location</th>
               <th>Club</th>
               <th>Videos</th>
@@ -82,6 +89,7 @@ export default function Sessions() {
                 <td>
                   <Link to={`/sessions/${s.id}`}>{new Date(s.recorded_at).toLocaleDateString()}</Link>
                 </td>
+                <td>{s.name ?? "—"}</td>
                 <td>{s.location ?? "—"}</td>
                 <td>{s.club_used ?? "—"}</td>
                 <td>{s.num_videos}</td>

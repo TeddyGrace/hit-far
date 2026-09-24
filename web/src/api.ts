@@ -18,6 +18,7 @@ export type EventType = (typeof EVENT_TYPES)[number];
 export interface Session {
   id: string;
   recorded_at: string;
+  name: string | null;
   location: string | null;
   club_used: string | null;
   notes: string | null;
@@ -359,9 +360,11 @@ export const api = {
   deleteUser: (id: string) => request<void>("DELETE", `/api/users/${id}`),
 
   listSessions: () => request<SessionSummary[]>("GET", "/api/sessions"),
-  createSession: (body: Partial<Pick<Session, "recorded_at" | "location" | "club_used" | "notes">>) =>
+  createSession: (body: Partial<Pick<Session, "recorded_at" | "name" | "location" | "club_used" | "notes">>) =>
     request<Session>("POST", "/api/sessions", body),
   getSession: (id: string) => request<SessionDetail>("GET", `/api/sessions/${id}`),
+  updateSession: (id: string, body: Partial<Pick<Session, "name" | "location" | "club_used" | "notes">>) =>
+    request<Session>("PATCH", `/api/sessions/${id}`, body),
   deleteSession: (id: string) => request<void>("DELETE", `/api/sessions/${id}`),
 
   createUpload: (sessionId: string, filename: string, contentType: string, cameraRole: CameraRole) =>
