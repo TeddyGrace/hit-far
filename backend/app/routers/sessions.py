@@ -49,7 +49,7 @@ def create_session(body: SessionIn, db: Session = Depends(get_db), user: User = 
     s = RecordingSession(
         user_id=user.id,
         recorded_at=body.recorded_at or datetime.now(timezone.utc),
-        location=body.location, club_used=body.club_used, notes=body.notes,
+        name=body.name, location=body.location, club_used=body.club_used, notes=body.notes,
     )
     db.add(s)
     db.commit()

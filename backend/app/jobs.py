@@ -14,13 +14,14 @@ JOB_TRAIN_EVENTS = "train_events"
 JOB_RECOMPUTE_METRICS = "recompute_metrics"
 JOB_TRAIN_OUTCOMES = "train_outcomes"
 JOB_TRACK_CLUB = "track_club"
+JOB_TRAIN_CLUB = "train_club"
 
-# Which job types each worker role consumes. Training runs for hours on its own service so it
-# never blocks swing processing. Outcome models are small tabular models that train in seconds, so
+# Which job types each worker role consumes. Training (event model, club detector) runs for a long
+# time on its own service so it never blocks swing processing. Outcome models are small tabular models that train in seconds, so
 # the processing worker runs them.
 ROLE_JOB_TYPES = {
     "worker": (JOB_PROCESS_VIDEO, JOB_DETECT_EVENTS, JOB_RECOMPUTE_METRICS, JOB_TRAIN_OUTCOMES, JOB_TRACK_CLUB),
-    "trainer": (JOB_TRAIN_EVENTS,),
+    "trainer": (JOB_TRAIN_EVENTS, JOB_TRAIN_CLUB),
 }
 
 

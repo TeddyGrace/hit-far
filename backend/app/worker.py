@@ -41,6 +41,9 @@ def run_job(job_id: uuid.UUID, type_: str, payload: dict) -> None:
 
         if type_ == jobs.JOB_PROCESS_VIDEO:
             process_video(db, uuid.UUID(payload["video_id"]), force=payload.get("force", False), on_stage=on_stage)
+            from app.training.train_club import maybe_queue_training
+
+            maybe_queue_training(db)  # more swings may open the club detector's data gate
         elif type_ == jobs.JOB_DETECT_EVENTS:
             redetect_events(db, uuid.UUID(payload["swing_id"]))
         elif type_ == jobs.JOB_RECOMPUTE_METRICS:
@@ -62,6 +65,10 @@ def run_job(job_id: uuid.UUID, type_: str, payload: dict) -> None:
             from app.training.train_events import run_training
 
             run_training(db, payload, on_stage=on_stage)
+        elif type_ == jobs.JOB_TRAIN_CLUB:
+            from app.training.train_club import run_club_training
+
+            run_club_training(db, payload, on_stage=on_stage)
         else:
             raise PermanentError(f"unknown job type {type_!r}")
 

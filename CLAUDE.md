@@ -22,10 +22,30 @@ The golfer's main miss is a **hook / duck-hook**, and they suspect lead-wrist tw
     frames. At 30 fps it reports low confidence at impact instead of guessing.
   - It is not yet validated on real footage. Check it on the user's first range session: the
     shaft line on the swing page, and the confidence it reports.
-- **Stage 2: pending. Do next, once the user has uploaded a few range sessions.** Train a learned
-  shaft/clubhead detector (keypoints: grip end and clubhead) from the stage-1 tracker's
-  high-confidence frames (pseudo-labels) plus the user's `task=club` corrections. Register it in
-  `models` and auto-promote it when it beats the line tracker on held-out corrected frames.
+- **Stage 2: BUILT, data-gated** (`club-heatmap-cnn`, `backend/app/training/{club_model,train_club,club_inference}.py`).
+  - A heatmap CNN (grip end and clubhead) on a crop centred on the pose grip, with gray, background-subtracted
+    and motion channels. Its clubhead heatmap becomes per-direction scores that feed the stage-1 DP decoder
+    (`club.track_from_scores`). Confidence is the probability mass on the chosen direction.
+  - Training data:
+    - Tracker frames with confidence ≥ 0.8. The clubhead comes from `club.shaft_end`, only when the sweep is
+      ≤ 1.2°/frame; above that, motion blur cuts the line short.
+    - `task=club` labels: fixes (with `clubhead_xy`) and "Shaft looks right" confirmations (`confirmed: true`).
+  - Crops are cached in the bucket at `datasets/club/crops/`.
+  - Gate: ≥ 8 swings; ≥ 20 checked frames on ≥ 2 held-out swings. Every 3rd checked swing, in hash order, is
+    held out.
+  - The `train_club` job runs on the trainer. It is queued by `maybe_queue_training`, which is called at start-up,
+    after processing a video, and after each shaft check.
+  - Auto-promotion is judged on the held-out swings, with everything run exactly as deployed:
+    - lower median error than the tracker on *fixed* frames. Confirmations give the confirmed model 0°, so
+      medians over all checks would be meaningless;
+    - within-10° rate over all checks ≥ the tracker's;
+    - agreement with the tracker's confident frames ≤ 6°;
+    - no worse than the current active detector.
+  - Promotion re-tracks every swing. Runtime failures fall back to the line tracker.
+  - On synthetic video, a detector trained only on tracker pseudo-labels beats its teacher: 0.5–1.3° median
+    error vs 2.7–3.8°, and the clubhead is within ~3% of shaft length.
+  - Production had only ~4 swings when this was built, so the gate is closed. Once the user has range sessions
+    and shaft checks, look at the first run's eval on the Models page.
 - **Stage 3: pending.** Clubhead and face orientation. A shaft *line* seen face-on cannot show the
   face rotating about the shaft axis, and that rotation is the true signal for the golfer's
   hook/duck-hook. It needs clubhead detection, ideally from a down-the-line camera or at a high

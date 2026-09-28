@@ -9,6 +9,7 @@ from app import jobs
 from app.auth import current_user, require_auth
 from app.db import get_db
 from app.models import Job, JobStatus, Label, Model, ModelStatus, Swing, User
+from app.pipeline.registry import TASK_CLUB
 from app.pipeline.run import latest_pose_sequence
 from app.routers.models_registry import visible_models
 from app.routers.swings import get_swing_or_404, swing_detail
@@ -51,8 +52,30 @@ def start_event_training(body: TrainIn, db: Session = Depends(get_db)):
 
 @router.get("/training/jobs", response_model=list[TrainingJobOut])
 def training_jobs(db: Session = Depends(get_db)):
-    return db.scalars(select(Job).where(Job.type == jobs.JOB_TRAIN_EVENTS).order_by(Job.created_at.desc())
-                      .limit(10)).all()
+    return db.scalars(select(Job).where(Job.type.in_([jobs.JOB_TRAIN_EVENTS, jobs.JOB_TRAIN_CLUB]))
+                      .order_by(Job.created_at.desc()).limit(10)).all()
+
+
+@router.get("/training/club/status")
+def club_training_status(db: Session = Depends(get_db)) -> dict:
+    """How close the club detector is to its data gate (it trains by itself once it's met)."""
+    from app.training.train_club import data_status
+
+    return data_status(db)
+
+
+@router.post("/training/club", response_model=TrainingJobOut, status_code=201)
+def start_club_training(db: Session = Depends(get_db)):
+    from app.training.train_club import data_status, queue_training
+
+    if _active_job(db, jobs.JOB_TRAIN_CLUB):
+        raise HTTPException(409, "a club detector training run is already queued or running")
+    st = data_status(db)
+    if not st["ready"]:
+        raise HTTPException(400, "not enough data yet: needs " + ", ".join(st["needs"]))
+    job = queue_training(db, st)
+    db.commit()
+    return job
 
 
 @router.get("/training/status")
@@ -73,6 +96,11 @@ def promote(model_id: uuid.UUID, db: Session = Depends(get_db), user: User = Dep
         if other.id != m.id:
             other.status = ModelStatus.deprecated
     m.status = ModelStatus.active
+    db.flush()
+    if m.task == TASK_CLUB:
+        from app.automation import queue_club_retrack
+
+        queue_club_retrack(db)  # re-track swings with the model you just made active
     db.commit()
     return visible_models(db, user)
 

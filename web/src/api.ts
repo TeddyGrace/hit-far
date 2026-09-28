@@ -18,6 +18,7 @@ export type EventType = (typeof EVENT_TYPES)[number];
 export interface Session {
   id: string;
   recorded_at: string;
+  name: string | null;
   location: string | null;
   club_used: string | null;
   notes: string | null;
@@ -136,7 +137,24 @@ export interface ClubFrames {
   angle_deg: (number | null)[];
   confidence: number[];
   grip: ([number, number] | null)[];
-  corrected: number[];
+  corrected: number[]; // frames you labelled (fixed or confirmed)
+  confirmed: number[]; // of those, the ones you confirmed as right
+  clubhead: ([number, number] | null)[] | null; // learned detector only
+  model_name: string | null;
+  model_version: string | null;
+}
+
+export interface ClubTrainingStatus {
+  swings: number;
+  labelled_swings: number;
+  labelled_frames: number;
+  test_swings: number;
+  test_frames: number;
+  ready: boolean;
+  min_swings: number;
+  min_test_swings: number;
+  min_test_frames: number;
+  needs: string[];
 }
 
 export type Verdict = "confirmed" | "rejected" | "unsure";
@@ -359,9 +377,11 @@ export const api = {
   deleteUser: (id: string) => request<void>("DELETE", `/api/users/${id}`),
 
   listSessions: () => request<SessionSummary[]>("GET", "/api/sessions"),
-  createSession: (body: Partial<Pick<Session, "recorded_at" | "location" | "club_used" | "notes">>) =>
+  createSession: (body: Partial<Pick<Session, "recorded_at" | "name" | "location" | "club_used" | "notes">>) =>
     request<Session>("POST", "/api/sessions", body),
   getSession: (id: string) => request<SessionDetail>("GET", `/api/sessions/${id}`),
+  updateSession: (id: string, body: Partial<Pick<Session, "name" | "location" | "club_used" | "notes">>) =>
+    request<Session>("PATCH", `/api/sessions/${id}`, body),
   deleteSession: (id: string) => request<void>("DELETE", `/api/sessions/${id}`),
 
   createUpload: (sessionId: string, filename: string, contentType: string, cameraRole: CameraRole) =>
@@ -375,21 +395,25 @@ export const api = {
   deleteVideo: (videoId: string) => request<void>("DELETE", `/api/videos/${videoId}`),
 
   getSwing: (id: string) => request<SwingDetail>("GET", `/api/swings/${id}`),
-  updateSwing: (id: string, body: { is_reference?: boolean; club_used?: string | null }) =>
+  updateSwing: (id: string, body: { is_reference?: boolean; club_used?: string | null; name?: string }) =>
     request<SwingDetail>("PATCH", `/api/swings/${id}`, body),
   getPose: (id: string) => request<PoseFrames>("GET", `/api/swings/${id}/pose`),
   correctEvent: (id: string, event: EventType, frame_index: number | null) =>
     request<SwingDetail>("PUT", `/api/swings/${id}/events/${event}`, { frame_index }),
 
   getClub: (id: string) => request<ClubFrames>("GET", `/api/swings/${id}/club`),
-  correctClub: (id: string, frame: number, angle_deg: number | null) =>
-    request<SwingDetail>("PUT", `/api/swings/${id}/club/${frame}`, { angle_deg }),
+  correctClub: (id: string, frame: number, angle_deg: number | null, clubhead_xy: [number, number] | null = null) =>
+    request<SwingDetail>("PUT", `/api/swings/${id}/club/${frame}`, { angle_deg, clubhead_xy }),
+  confirmClub: (id: string, frame: number) =>
+    request<SwingDetail>("PUT", `/api/swings/${id}/club/${frame}`, { confirm: true }),
 
   listModels: () => request<ModelInfo[]>("GET", "/api/models"),
 
   startEventTraining: (epochs = 40) => request<TrainingJob>("POST", "/api/training/events", { epochs }),
   trainingJobs: () => request<TrainingJob[]>("GET", "/api/training/jobs"),
   trainingStatus: () => request<{ reviewed_swings: number }>("GET", "/api/training/status"),
+  clubTrainingStatus: () => request<ClubTrainingStatus>("GET", "/api/training/club/status"),
+  startClubTraining: () => request<TrainingJob>("POST", "/api/training/club"),
   promoteModel: (id: string) => request<ModelInfo[]>("POST", `/api/models/${id}/promote`),
   redetectAll: () => request<{ queued: number }>("POST", "/api/swings/redetect-events"),
   setReviewed: (swingId: string, reviewed: boolean) =>

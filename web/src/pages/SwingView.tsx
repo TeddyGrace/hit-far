@@ -10,6 +10,50 @@ import { WhatIfList } from "./Analysis";
 
 const RATES = [1, 0.5, 0.25, 0.1];
 
+/** Swing title; double-click to rename (Enter or blur saves, Escape cancels). */
+function SwingName({ name, onRename }: { name: string; onRename: (name: string) => Promise<void> }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const done = useRef(false);
+
+  const finish = async (save: boolean) => {
+    if (done.current || draft == null) return;
+    done.current = true;
+    const next = draft.trim();
+    if (save && next && next !== name) await onRename(next);
+    setDraft(null);
+  };
+
+  if (draft == null) {
+    return (
+      <h1
+        className="swing-name"
+        title="Double-click to rename"
+        onDoubleClick={() => {
+          done.current = false;
+          setDraft(name);
+        }}
+      >
+        {name}
+      </h1>
+    );
+  }
+  return (
+    <input
+      className="swing-name-input"
+      autoFocus
+      maxLength={300}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onFocus={(e) => e.target.select()}
+      onBlur={() => finish(true)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") finish(true);
+        else if (e.key === "Escape") finish(false);
+      }}
+    />
+  );
+}
+
 export default function SwingView() {
   const { id } = useParams<{ id: string }>();
   const [swing, setSwing] = useState<SwingDetail | null>(null);
@@ -37,11 +81,11 @@ export default function SwingView() {
   }, [id]);
 
   const setShaft = useCallback(
-    async (f: number, angle: number | null) => {
+    async (f: number, angle: number | null, clubhead: [number, number] | null = null, confirm = false) => {
       if (!id) return;
       setSaving(true);
       try {
-        setSwing(await api.correctClub(id, f, angle));
+        setSwing(await (confirm ? api.confirmClub(id, f) : api.correctClub(id, f, angle, clubhead)));
         setClub(await api.getClub(id));
       } catch (e) {
         setError((e as Error).message);
@@ -146,7 +190,16 @@ export default function SwingView() {
         <Link to={`/sessions/${swing.session_id}`}>← Session</Link>
       </p>
       <div className="swing-header">
-        <h1>{swing.video.original_filename}</h1>
+        <SwingName
+          name={swing.video.original_filename ?? "Untitled swing"}
+          onRename={async (name) => {
+            try {
+              setSwing(await api.updateSwing(swing.id, { name }));
+            } catch (e) {
+              setError((e as Error).message);
+            }
+          }}
+        />
         <label className="inline">
           <input
             type="checkbox"
@@ -176,7 +229,7 @@ export default function SwingView() {
                 picking && club?.grip[frame]
                   ? (x, y) => {
                       const g = club.grip[frame]!;
-                      setShaft(frame, (Math.atan2(y - g[1], x - g[0]) * 180) / Math.PI);
+                      setShaft(frame, (Math.atan2(y - g[1], x - g[0]) * 180) / Math.PI, [x, y]);
                     }
                   : null
               }
@@ -228,14 +281,22 @@ export default function SwingView() {
                 Shaft{" "}
                 {club.angle_deg[frame] == null
                   ? "not tracked on this frame"
-                  : club.corrected.includes(frame)
-                    ? "set by you"
-                    : `confidence ${(club.confidence[frame] ?? 0).toFixed(2)}${(club.confidence[frame] ?? 0) < 0.5 ? " (not used for metrics)" : ""}`}
+                  : club.confirmed.includes(frame)
+                    ? "checked by you"
+                    : club.corrected.includes(frame)
+                      ? "set by you"
+                      : `confidence ${(club.confidence[frame] ?? 0).toFixed(2)}${(club.confidence[frame] ?? 0) < 0.5 ? " (not used for metrics)" : ""}`}
               </span>
               <button className={`small ${picking ? "on" : ""}`} disabled={!club.grip[frame] || saving}
                 onClick={() => setPicking((p) => !p)}>
                 {picking ? "Click the clubhead…" : "Fix shaft on this frame"}
               </button>
+              {club.angle_deg[frame] != null && !club.corrected.includes(frame) && !picking && (
+                <button className="small" disabled={saving} onClick={() => setShaft(frame, null, null, true)}
+                  title="The shaft line shown on this frame is right. Checked frames train the club detector.">
+                  Shaft looks right
+                </button>
+              )}
               {club.corrected.includes(frame) && (
                 <button className="link small" onClick={() => setShaft(frame, null)}>revert</button>
               )}
