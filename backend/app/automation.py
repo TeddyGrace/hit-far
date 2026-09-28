@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app import jobs
 from app.models import Job, JobStatus, Model
+from app.outcomes.service import maybe_queue_training, users_with_stale_models
 from app.pipeline.registry import TASK_EVENTS
 from app.pipeline.run import swings_needing_club, swings_needing_metrics
 
@@ -43,6 +44,10 @@ def queue_startup_jobs(db: Session) -> list[str]:
     if ok:
         queue_training(db, st)
         queued.append(jobs.JOB_TRAIN_CLUB)
+    # Outcome models trained under an older problem definition (PROBLEMS_VERSION bump): retrain.
+    stale = [uid for uid in users_with_stale_models(db) if maybe_queue_training(db, uid, force=True)]
+    if stale:
+        queued.append(f"{jobs.JOB_TRAIN_OUTCOMES} x{len(stale)}")
     # First event-model training: once, if nothing trained exists and no run was ever attempted
     # (a failed run is not retried automatically; start it again from the Models page).
     trained = db.scalar(select(Model.id).where(Model.task == TASK_EVENTS, Model.checkpoint_uri.is_not(None)).limit(1))

@@ -2,11 +2,11 @@ import { useState } from "react";
 import { api, CONTACTS, OutcomePatch, SHAPES, ShotOutcome, START_LINES } from "../api";
 
 const SHAPE_HINT: Record<string, string> = {
-  slice: "Curves hard away from you",
-  fade: "Curves gently away from you",
-  straight: "No curve",
-  draw: "Curves gently in toward you",
-  hook: "Curves hard in toward you",
+  slice: "Curves hard away from you: a miss",
+  fade: "Gentle, controlled curve away from you: counts as a good shot",
+  straight: "No curve: a good shot",
+  draw: "Gentle, controlled curve in toward you: counts as a good shot",
+  hook: "Curves hard in toward you: a miss",
 };
 
 /** One-tap shot outcome. Tapping the selected chip again clears it. */

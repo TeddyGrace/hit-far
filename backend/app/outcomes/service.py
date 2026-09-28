@@ -30,7 +30,7 @@ from app.models import (
     Video,
 )
 from app.outcomes.features import Table, load_table, outcome_dict, select_features
-from app.outcomes.problems import PROBLEMS, Problem
+from app.outcomes.problems import PROBLEMS, PROBLEMS_VERSION, Problem
 from app.outcomes.train import CVSettings, eligibility, jsonsafe, recipe_auc, train_problem, what_if
 from app.pipeline.metrics import PIPELINE_VERSION
 from app.pipeline.run import effective_events
@@ -144,6 +144,18 @@ def active_outcome_model(db: Session, problem: str, user_id: uuid.UUID) -> Model
                      .order_by(Model.created_at.desc()).limit(1))
 
 
+def is_stale(m: Model) -> bool:
+    """Trained under an older problem definition (see PROBLEMS_VERSION)."""
+    return (m.eval_metrics or {}).get("problems_version") != PROBLEMS_VERSION
+
+
+def users_with_stale_models(db: Session) -> list[uuid.UUID]:
+    rows = db.execute(select(Model.user_id, Model.eval_metrics).where(
+        Model.task.startswith("outcome_", autoescape=True), Model.status == ModelStatus.active,
+        Model.user_id.is_not(None))).all()
+    return sorted({uid for uid, em in rows if (em or {}).get("problems_version") != PROBLEMS_VERSION}, key=str)
+
+
 def run_outcome_training(db: Session, payload: dict | None = None,
                          on_stage: Callable[[str], None] = lambda s: None) -> dict:
     """Train one golfer's outcome models (`payload["user_id"]`), or every golfer's when the payload
@@ -186,6 +198,12 @@ def _train_user(db: Session, user_id: uuid.UUID, payload: dict, on_stage: Callab
         ids, y = _labels(table, problem)
         elig = eligibility(y, cfg)
         if not elig["eligible"]:
+            # A model trained under an older problem definition would keep predicting the old
+            # question; retire it rather than leave it active.
+            stale = active_outcome_model(db, problem.key, user_id)
+            if stale is not None and is_stale(stale):
+                stale.status = ModelStatus.deprecated
+                db.commit()
             summary[problem.key] = {"trained": False, **elig}
             continue
         on_stage(f"training {problem.key}")
@@ -198,7 +216,10 @@ def _train_user(db: Session, user_id: uuid.UUID, payload: dict, on_stage: Callab
         # Same-data comparison with the active model's recipe (model kind + feature set).
         current = active_outcome_model(db, problem.key, user_id)
         promote, compared = True, None
-        if current is not None and current.eval_metrics:
+        if current is not None and is_stale(current):
+            # Trained on a different definition of the problem: not comparable, always replace.
+            compared = {"version": current.version, "stale_problem_definition": True}
+        elif current is not None and current.eval_metrics:
             old_kind = current.eval_metrics.get("kind")
             old_feats = [f for f in current.eval_metrics.get("features", []) if f in all_names]
             if old_kind == res.kind and old_feats == names:
@@ -214,12 +235,13 @@ def _train_user(db: Session, user_id: uuid.UUID, payload: dict, on_stage: Callab
         buf = io.BytesIO()
         joblib.dump({"estimator": res.estimator, "kind": res.kind, "features": names, "problem": problem.key,
                      "oof": res.oof, "factors": res.eval["factors"], "version": version,
-                     "pipeline_version": PIPELINE_VERSION}, buf)
+                     "pipeline_version": PIPELINE_VERSION, "problems_version": PROBLEMS_VERSION}, buf)
         ckpt = f"models/{model_name(problem.key)}/{user_id}/{version}/model.joblib"
         st.put_bytes(ckpt, buf.getvalue())
         m = Model(name=model_name(problem.key), version=version, task=model_task(problem.key),
                   checkpoint_uri=ckpt, trained_on_dataset_id=ds.id,
                   eval_metrics=jsonsafe({**res.eval, "features": names, "pipeline_version": PIPELINE_VERSION,
+                                         "problems_version": PROBLEMS_VERSION,
                                          "compared_to": compared, "auto_promoted": promote}),
                   status=ModelStatus.experimental, user_id=user_id,
                   notes=f"{problem.title}: {problem.description}")

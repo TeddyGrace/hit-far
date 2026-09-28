@@ -6,6 +6,10 @@ SHAPES = ("slice", "fade", "straight", "draw", "hook")
 START_LINES = ("left", "straight", "right")
 CONTACTS = ("fat", "solid", "thin")
 
+# Bump whenever a problem's positive or negative set changes: models trained under another version
+# answer a different question, so start-up retrains them and they are never compared like-for-like.
+PROBLEMS_VERSION = 2
+
 
 @dataclass(frozen=True)
 class Problem:
@@ -28,10 +32,11 @@ class Problem:
 PROBLEMS: dict[str, Problem] = {
     p.key: p
     for p in (
-        Problem("slice", "Slice", "shape", frozenset({"slice", "fade"}), frozenset({"straight", "draw", "hook"}),
-                "Ball curves away from you (slice or fade) vs. straight or curving in"),
-        Problem("hook", "Hook", "shape", frozenset({"hook", "draw"}), frozenset({"straight", "fade", "slice"}),
-                "Ball curves in toward you (hook or draw) vs. straight or curving away"),
+        # A controlled fade or draw is a good shot; only the hard curve is the miss.
+        Problem("slice", "Slice", "shape", frozenset({"slice"}), frozenset({"fade", "straight", "draw", "hook"}),
+                "Ball curves hard away from you (slice) vs. anything else, including a controlled fade"),
+        Problem("hook", "Hook", "shape", frozenset({"hook"}), frozenset({"draw", "straight", "fade", "slice"}),
+                "Ball curves hard in toward you (hook) vs. anything else, including a controlled draw"),
         Problem("fat", "Fat", "contact", frozenset({"fat"}), frozenset({"solid", "thin"}),
                 "Ground before the ball vs. solid or thin"),
         Problem("thin", "Thin", "contact", frozenset({"thin"}), frozenset({"solid", "fat"}),
