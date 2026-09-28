@@ -80,36 +80,6 @@ cd ../web && npm run typecheck && npm run build
 
 The integration tests run the real upload → worker → ffmpeg proxy → events → metrics → correction flow. They use local storage and a synthetic stick-figure swing in place of MediaPipe, because MediaPipe needs a real person to detect.
 
-## Deploying on Railway
-
-The whole project is **one Docker image, run as two services**: the API, which also serves the built React app, and the worker. Alongside them you need a Postgres database and a storage bucket.
-
-1. **Create a project** and add:
-   - a **PostgreSQL** database
-   - a **Bucket** (Railway Storage Bucket)
-2. **Create two services from this repo** (branch `main`). Both use the root `Dockerfile`, and `backend/start.sh` picks the role:
-   - **API**: no `SERVICE_ROLE`. It runs `alembic upgrade head`, then serves the app. Generate a public domain for it, and optionally set the healthcheck path to `/api/health`.
-   - **Worker**: `SERVICE_ROLE=worker`. It needs no domain. Give it at least 2 GB of RAM. Pose runs on CPU at about 80 ms per frame, so a 3 s clip at 240 fps takes roughly a minute.
-   - **Trainer**: `SERVICE_ROLE=trainer`, with the same variables as the worker. It runs only training jobs, and more vCPUs make pose extraction and training faster.
-   - `deploy/railway.*.json` are optional config-as-code equivalents.
-3. **Set these variables on both services.** Use shared variables or reference variables.
-
-   | Variable | Value |
-   |---|---|
-   | `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` |
-   | `APP_PASSWORD` | the first user's password (see **Users** below) |
-   | `OWNER_USERNAME` | optional; the first user's name (default `owner`) |
-   | `SECRET_KEY` | a long random string (e.g. `openssl rand -hex 32`) |
-   | `COOKIE_SECURE` | `true` |
-   | `STORAGE_BACKEND` | `s3` |
-   | `S3_ENDPOINT_URL`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_REGION` | from the bucket's credentials (`BUCKET_*` names are also accepted) |
-   | `PUBLIC_ORIGIN` | the API's public URL, e.g. `https://hit-far-production.up.railway.app` |
-   | `GOLFER_HANDEDNESS` | `right` or `left` |
-   | `ANTHROPIC_API_KEY` | API service only; enables diagnosis |
-
-   If you get signature or host errors, set `S3_ADDRESSING_STYLE=path`.
-4. **Browser uploads go straight to the bucket** through presigned URLs, so the bucket needs CORS for your origin. The API sets it at startup whenever `PUBLIC_ORIGIN` is set. Check the API logs for `bucket CORS set for …`.
-
 ## Users
 
 A few golfers can share one deployment. Everyone logs in with a username and password. Passwords are stored as salted scrypt hashes. There is no sign-up page: users are managed from the command line on the API service (for example `railway ssh`; the container starts in `/app/backend`):
