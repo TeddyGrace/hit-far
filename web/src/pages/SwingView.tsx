@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, ClubFrames, EVENT_LABELS, EVENT_TYPES, EventType, PoseFrames, Prediction, SwingDetail } from "../api";
 import DiagnosisPanel from "../components/DiagnosisPanel";
 import EventTimeline, { REVIEW_THRESHOLD } from "../components/EventTimeline";
@@ -51,6 +51,36 @@ function SwingName({ name, onRename }: { name: string; onRename: (name: string) 
         else if (e.key === "Escape") finish(false);
       }}
     />
+  );
+}
+
+/** Jumps to the next swing in this session that has no shape tagged yet. */
+function NextUntagged({ sessionId, swingId }: { sessionId: string; swingId: string }) {
+  const navigate = useNavigate();
+  const [busy, setBusy] = useState(false);
+  const [none, setNone] = useState(false);
+  async function go() {
+    setBusy(true);
+    setNone(false);
+    try {
+      const s = await api.getSession(sessionId);
+      const swings = s.videos.filter((v) => v.swing_id);
+      const i = swings.findIndex((v) => v.swing_id === swingId);
+      const after = [...swings.slice(i + 1), ...swings.slice(0, Math.max(i, 0))];
+      const next = after.find((v) => v.swing_id !== swingId && !v.outcome?.shape);
+      if (next?.swing_id) navigate(`/swings/${next.swing_id}`);
+      else setNone(true);
+    } catch {
+      setNone(true);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="next-bar">
+      <button className="primary" onClick={go} disabled={busy}>Next untagged swing →</button>
+      {none && <span className="muted small">No other untagged swings in this session.</span>}
+    </div>
   );
 }
 
@@ -238,10 +268,11 @@ export default function SwingView() {
             <p className="muted">No playback video.</p>
           )}
           <div className="controls">
-            <button onClick={() => seek(frame - 1)} title="Previous frame (←)">
+            <button onClick={() => seek(frame - 1)} title="Previous frame (←)" aria-label="Previous frame">
               ◀
             </button>
             <button
+              style={{ minWidth: "4.5rem" }}
               onClick={() => {
                 const v = videoRef.current!;
                 if (v.paused) v.play();
@@ -250,7 +281,7 @@ export default function SwingView() {
             >
               {playing ? "Pause" : "Play"}
             </button>
-            <button onClick={() => seek(frame + 1)} title="Next frame (→)">
+            <button onClick={() => seek(frame + 1)} title="Next frame (→)" aria-label="Next frame">
               ▶
             </button>
             <select value={rate} onChange={(e) => setRate(Number(e.target.value))} title="Playback speed">
@@ -319,6 +350,7 @@ export default function SwingView() {
           <section>
             <h2>Shot outcome</h2>
             <OutcomeChips key={swing.id} swingId={swing.id} outcome={swing.outcome} full />
+            <NextUntagged sessionId={swing.session_id} swingId={swing.id} />
           </section>
 
           {predictions && predictions.length > 0 && (

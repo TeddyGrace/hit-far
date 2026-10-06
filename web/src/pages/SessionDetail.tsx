@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, CameraRole, SessionDetail as SessionDetailT, uploadFile, VideoWithStatus } from "../api";
 import OutcomeChips from "../components/OutcomeChips";
+import { useUi } from "../components/ui";
 
 interface PendingUpload {
   key: string;
@@ -24,6 +25,7 @@ function StatusChip({ v }: { v: VideoWithStatus }) {
 }
 
 export default function SessionDetail() {
+  const ui = useUi();
   const { id } = useParams<{ id: string }>();
   const [session, setSession] = useState<SessionDetailT | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -44,12 +46,19 @@ export default function SessionDetail() {
 
   useEffect(load, [load]);
 
+  // The page polls while jobs run. Only overwrite a field if the user hasn't edited it.
+  const prevSession = useRef<SessionDetailT | null>(null);
   useEffect(() => {
     if (!session) return;
-    setName(session.name ?? "");
-    setLocation(session.location ?? "");
-    setClub(session.club_used ?? "");
-    setNotes(session.notes ?? "");
+    const prev = prevSession.current;
+    const fresh = !prev || prev.id !== session.id;
+    const sync = (cur: string, was: string | null | undefined, next: string | null | undefined) =>
+      fresh || cur === (was ?? "") ? (next ?? "") : cur;
+    setName((c) => sync(c, prev?.name, session.name));
+    setLocation((c) => sync(c, prev?.location, session.location));
+    setClub((c) => sync(c, prev?.club_used, session.club_used));
+    setNotes((c) => sync(c, prev?.notes, session.notes));
+    prevSession.current = session;
   }, [session]);
 
   const dirty =
@@ -186,7 +195,7 @@ export default function SessionDetail() {
       {session.videos.length === 0 ? (
         <p className="muted">No videos yet.</p>
       ) : (
-        <table className="table">
+        <div className="table-wrap"><table className="table">
           <thead>
             <tr>
               <th>File</th>
@@ -231,7 +240,10 @@ export default function SessionDetail() {
                   </button>
                   <button
                     className="link danger"
-                    onClick={() => confirm(`Delete ${v.original_filename}?`) && act(() => api.deleteVideo(v.id))}
+                    onClick={async () => {
+                      if (await ui.confirm({ title: `Delete ${v.original_filename ?? "this video"}?`, confirmLabel: "Delete", danger: true }))
+                        act(() => api.deleteVideo(v.id));
+                    }}
                   >
                     Delete
                   </button>
@@ -239,16 +251,26 @@ export default function SessionDetail() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       )}
 
       <p>
         <button
           className="link danger"
           onClick={async () => {
-            if (!confirm("Delete this session and all its videos, swings and outputs?")) return;
-            await api.deleteSession(session.id);
-            navigate("/");
+            const ok = await ui.confirm({
+              title: "Delete this session?",
+              body: "This removes all its videos, swings and outputs.",
+              confirmLabel: "Delete session",
+              danger: true,
+            });
+            if (!ok) return;
+            try {
+              await api.deleteSession(session.id);
+              navigate("/");
+            } catch (e) {
+              ui.toast((e as Error).message, "error");
+            }
           }}
         >
           Delete session

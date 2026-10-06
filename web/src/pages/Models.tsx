@@ -1,3 +1,4 @@
+import { useUi } from "../components/ui";
 import { useCallback, useEffect, useState } from "react";
 import { api, ClubTrainingStatus, EvalResult, ModelInfo, TrainingJob } from "../api";
 
@@ -132,6 +133,7 @@ function EvalSummary({ m }: { m: ModelInfo }) {
 }
 
 export default function Models() {
+  const ui = useUi();
   const [models, setModels] = useState<ModelInfo[] | null>(null);
   const [runs, setRuns] = useState<TrainingJob[]>([]);
   const [reviewed, setReviewed] = useState<number | null>(null);
@@ -241,7 +243,7 @@ export default function Models() {
         for its task; the previous one is kept (deprecated) and can be promoted back.
       </p>
       {models && (
-        <table className="table">
+        <div className="table-wrap"><table className="table">
           <thead>
             <tr>
               <th>Task</th>
@@ -271,12 +273,16 @@ export default function Models() {
                   {m.status !== "active" && m.task === "event_segmentation" && (
                     <button
                       className="link"
-                      onClick={() => {
+                      onClick={async () => {
                         const em = m.eval_metrics as Record<string, EvalResult> | null;
                         const mine = em?.golfdb_test_face_on?.pce;
                         const rules = em?.rules_golfdb_test_face_on?.pce;
                         if (mine != null && rules != null && mine < rules &&
-                          !confirm(`This model scores ${(mine * 100).toFixed(1)}% vs the rules' ${(rules * 100).toFixed(1)}% on held-out face-on swings. Promote anyway?`))
+                          !(await ui.confirm({
+                            title: "Promote anyway?",
+                            body: `This model scores ${(mine * 100).toFixed(1)}% vs the rules' ${(rules * 100).toFixed(1)}% on held-out face-on swings.`,
+                            confirmLabel: "Promote",
+                          })))
                           return;
                         act(() => api.promoteModel(m.id), `${m.name} ${m.version} is now the active event model`);
                       }}
@@ -287,12 +293,16 @@ export default function Models() {
                   {m.status !== "active" && m.task === "club_tracking" && (
                     <button
                       className="link"
-                      onClick={() => {
+                      onClick={async () => {
                         const em = m.eval_metrics as Record<string, ClubEval> | null;
                         const mine = em?.learned?.fixes?.median_err_deg;
                         const line = em?.line?.fixes?.median_err_deg;
                         if (mine != null && line != null && mine > line &&
-                          !confirm(`This detector is off by ${mine.toFixed(1)}° (median) vs the line tracker's ${line.toFixed(1)}° on the frames you fixed. Promote anyway?`))
+                          !(await ui.confirm({
+                            title: "Promote anyway?",
+                            body: `This detector is off by ${mine.toFixed(1)}° (median) vs the line tracker's ${line.toFixed(1)}° on the frames you fixed.`,
+                            confirmLabel: "Promote",
+                          })))
                           return;
                         act(() => api.promoteModel(m.id), `${m.name} ${m.version} is now the active club tracker; re-tracking every swing`);
                       }}
@@ -304,7 +314,7 @@ export default function Models() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       )}
     </>
   );

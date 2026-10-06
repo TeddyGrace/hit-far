@@ -1,8 +1,10 @@
+import { useUi } from "../components/ui";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { api, Me, UserInfo } from "../api";
 
 // Admin-only: add golfers, reset passwords, remove users. There is no sign-up page.
 export default function Users({ me }: { me: Me }) {
+  const ui = useUi();
   const [users, setUsers] = useState<UserInfo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -58,8 +60,8 @@ export default function Users({ me }: { me: Me }) {
     );
   }
 
-  function remove(u: UserInfo) {
-    if (window.confirm(`Delete ${u.username}? This can't be undone.`))
+  async function remove(u: UserInfo) {
+    if (await ui.confirm({ title: `Delete ${u.username}?`, body: "This can't be undone.", confirmLabel: "Delete", danger: true }))
       run(() => api.deleteUser(u.id), `Deleted ${u.username}.`);
   }
 
@@ -90,7 +92,7 @@ export default function Users({ me }: { me: Me }) {
       {users === null ? (
         <p className="muted">Loading…</p>
       ) : (
-        <table className="table">
+        <div className="table-wrap"><table className="table">
           <thead>
             <tr>
               <th>Username</th>
@@ -133,7 +135,7 @@ export default function Users({ me }: { me: Me }) {
               );
             })}
           </tbody>
-        </table>
+        </table></div>
       )}
     </div>
   );

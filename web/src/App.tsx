@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink, Route, Routes, useNavigate } from "react-router-dom";
 import { api, Me, setUnauthorizedHandler } from "./api";
+import { UiProvider } from "./components/ui";
 import Analysis from "./pages/Analysis";
 import Login from "./pages/Login";
 import Models from "./pages/Models";
@@ -23,7 +24,7 @@ export default function App() {
   if (me === null) return <Login onLogin={setMe} />;
 
   return (
-    <>
+    <UiProvider>
       <header className="topbar">
         <Link to="/" className="brand">
           hit-far
@@ -56,9 +57,9 @@ export default function App() {
           <Route path="/analysis" element={<Analysis />} />
           <Route path="/models" element={<Models />} />
           {me.is_admin && <Route path="/users" element={<Users me={me} />} />}
-          <Route path="*" element={<p>Not found.</p>} />
+          <Route path="*" element={<p>Not found. <Link to="/">Back to sessions</Link></p>} />
         </Routes>
       </main>
-    </>
+    </UiProvider>
   );
 }

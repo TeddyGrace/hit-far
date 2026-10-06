@@ -12,6 +12,7 @@
   --bad-soft: #fbe9e7;
   --blue: #2b6cb0;
   --blue-soft: #e6effa;
+  --on-accent: #ffffff;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   color: var(--text);
   background: var(--bg);
@@ -31,6 +32,7 @@
     --bad-soft: #3b201c;
     --blue: #7fb0ea;
     --blue-soft: #1c2a3b;
+    --on-accent: #0c1a12;
   }
 }
 * { box-sizing: border-box; }
@@ -43,20 +45,23 @@ h2 { font-size: 1rem; margin: 0 0 0.5rem; display: flex; gap: 0.5rem; align-item
 .error { color: var(--bad); }
 
 .topbar {
+  position: sticky; top: 0; z-index: 10; flex-wrap: wrap;
   display: flex; align-items: center; gap: 1.5rem; padding: 0.6rem 1rem;
   border-bottom: 1px solid var(--border); background: var(--panel);
 }
 .topbar .brand { font-weight: 700; text-decoration: none; color: var(--text); }
 .topbar nav { display: flex; gap: 1rem; flex: 1; }
 .topbar nav a { text-decoration: none; color: var(--muted); }
-.topbar nav a.active { color: var(--text); font-weight: 600; }
+.topbar nav a.active { color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
 .page { padding: 1rem; max-width: 1400px; margin: 0 auto; }
 
 button {
   font: inherit; padding: 0.4rem 0.8rem; border-radius: 6px; border: 1px solid var(--border);
   background: var(--panel); color: var(--text); cursor: pointer;
 }
-button[type="submit"] { background: var(--accent); color: white; border-color: var(--accent); }
+button[type="submit"], button.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+button.danger { background: var(--bad); color: var(--on-accent); border-color: var(--bad); }
+:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 button:disabled { opacity: 0.5; cursor: default; }
 button.link { border: none; background: none; padding: 0 0.3rem; color: var(--accent); }
 button.link.danger { color: var(--bad); }
@@ -71,7 +76,7 @@ label.inline { flex-direction: row; align-items: center; gap: 0.35rem; color: va
 .row-form { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: flex-end; margin-bottom: 1rem; }
 .row-form .grow { flex: 1; min-width: 200px; }
 
-.login { display: grid; place-items: center; min-height: 100vh; }
+.login { display: grid; place-items: center; min-height: 100vh; min-height: 100dvh; }
 .login form { display: flex; flex-direction: column; gap: 0.75rem; width: 300px; }
 
 .table { width: 100%; border-collapse: collapse; background: var(--panel); border-radius: 8px; overflow: hidden; }
@@ -116,7 +121,7 @@ label.inline { flex-direction: row; align-items: center; gap: 0.35rem; color: va
 .playhead { position: absolute; top: -6px; width: 2px; height: 22px; background: var(--text); transform: translateX(-1px); pointer-events: none; }
 .marker {
   position: absolute; top: 12px; transform: translateX(-50%); font-size: 0.65rem; font-weight: 700;
-  padding: 1px 4px; border-radius: 4px; background: var(--accent); color: white; cursor: grab; touch-action: none;
+  padding: 1px 4px; border-radius: 4px; background: var(--accent); color: var(--on-accent); cursor: grab; touch-action: none;
 }
 .marker::before {
   content: ""; position: absolute; left: 50%; top: -10px; width: 2px; height: 10px; background: inherit; transform: translateX(-1px);
@@ -150,9 +155,12 @@ button.small { padding: 0.15rem 0.55rem; font-size: 0.8rem; }
 
 /* Outcome tagging */
 .outcome-chips { display: flex; flex-wrap: wrap; gap: 0.4rem 0.8rem; }
-.outcome-chips.full { flex-direction: column; gap: 0.35rem; }
+.outcome-chips { align-items: center; }
+.outcome-chips.full { flex-direction: column; align-items: flex-start; gap: 0.35rem; }
+.outcome-hint { max-width: 36ch; }
+.outcome-status { min-width: 4rem; min-height: 1.2em; }
 .outcome-group { display: flex; gap: 0.25rem; align-items: center; flex-wrap: wrap; }
-.outcome-label { width: 3.8rem; }
+.outcome-label { width: 3.8rem; flex: none; }
 button.chip.outcome { cursor: pointer; font: inherit; font-size: 0.75rem; }
 button.chip.outcome.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); font-weight: 600; }
 button.chip.outcome.on.slice, button.chip.outcome.on.hook,
@@ -209,3 +217,37 @@ button.chip.outcome.on.fade, button.chip.outcome.on.draw { background: var(--war
 /* Club */
 .club-row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; font-size: 0.85rem; }
 button.on { background: var(--blue-soft); color: var(--blue); border-color: var(--blue); }
+
+/* Wide tables scroll sideways inside their own box instead of the page */
+.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+/* Toasts and confirm dialog */
+.toasts { position: fixed; left: 0; right: 0; bottom: 1rem; display: flex; flex-direction: column; align-items: center; gap: 0.4rem; pointer-events: none; z-index: 50; padding: 0 1rem; }
+.toast { pointer-events: auto; background: var(--text); color: var(--bg); padding: 0.55rem 0.9rem; border-radius: 8px; font-size: 0.9rem; box-shadow: 0 2px 10px rgba(0,0,0,0.25); max-width: 40rem; }
+.toast.error { background: var(--bad); color: var(--on-accent); }
+dialog.confirm { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); color: var(--text); padding: 1rem 1.25rem; max-width: min(26rem, 92vw); }
+dialog.confirm::backdrop { background: rgba(0,0,0,0.45); }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem; }
+
+/* Next-swing bar on the swing page */
+.next-bar { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+
+/* Touch: bigger targets for the things tapped at the range */
+@media (pointer: coarse) {
+  button, select, input { min-height: 44px; }
+  button.link { min-height: 44px; padding: 0 0.6rem; }
+  button.chip.outcome { min-height: 44px; padding: 0.2rem 0.9rem; font-size: 0.9rem; }
+  .outcome-group { gap: 0.4rem; }
+  .topbar nav a { padding: 0.7rem 0.3rem; display: inline-block; }
+  .controls button { min-width: 44px; }
+}
+
+@media (max-width: 700px) {
+  .page { padding: 0.75rem; }
+  .topbar { gap: 0.5rem 1rem; }
+  .topbar nav { order: 3; flex-basis: 100%; overflow-x: auto; }
+  .outcome-group { flex-wrap: wrap; }
+  .outcome-label { width: 100%; }
+  /* Stack the swing page outcome card right under the video; it already precedes the other cards */
+  .swing-layout { gap: 0.75rem; }
+}

@@ -71,7 +71,7 @@ export default function Sessions() {
       ) : sessions.length === 0 ? (
         <p className="muted">No sessions yet. Create one, then upload face-on swing videos to it.</p>
       ) : (
-        <table className="table">
+        <div className="table-wrap"><table className="table">
           <thead>
             <tr>
               <th>Date</th>
@@ -98,7 +98,7 @@ export default function Sessions() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       )}
     </>
   );
